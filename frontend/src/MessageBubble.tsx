@@ -33,6 +33,10 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
 
   const handleRightClick = (e: React.MouseEvent) => {
     e.preventDefault();
+    // Only allow branching from assistant messages
+    if (message.role !== 'assistant') {
+      return;
+    }
     setContextMenuPos({ x: e.clientX, y: e.clientY });
     setShowContextMenu(true);
   };
@@ -83,6 +87,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
         }}
         onContextMenu={handleRightClick}
         onClick={handleClick}
+        title={message.role === 'assistant' ? 'Right-click to create branch from this AI response' : 'Only AI responses can be branched from'}
       >
         <div className="message-header">
           <span className="role">{message.role}</span>
@@ -98,11 +103,6 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
           </span>
         </div>
         <div className="content">{message.content}</div>
-        {message.children.length > 0 && (
-          <div className="children-indicator">
-            {message.children.length} response{message.children.length > 1 ? 's' : ''}
-          </div>
-        )}
       </div>
 
       {/* Context Menu */}

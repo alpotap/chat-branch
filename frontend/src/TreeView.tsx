@@ -27,6 +27,8 @@ interface TreeViewProps {
   messages: { [key: string]: Message };
   rootMessages: string[];
   onMessageSelect: (messageId: string) => void;
+  onSwitchToChatView: (branchName: string, messageId: string) => void;
+  onCreateBranch: (messageId: string, branchName: string) => void;
   selectedMessage?: string;
 }
 
@@ -34,10 +36,35 @@ const TreeView: React.FC<TreeViewProps> = ({
   messages, 
   rootMessages, 
   onMessageSelect, 
+  onSwitchToChatView,
+  onCreateBranch,
   selectedMessage 
 }) => {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [showContextMenu, setShowContextMenu] = React.useState(false);
+  const [contextMenuPos, setContextMenuPos] = React.useState({ x: 0, y: 0 });
+  const [contextMenuMessage, setContextMenuMessage] = React.useState<Message | null>(null);
+  const [showBranchDialog, setShowBranchDialog] = React.useState(false);
+  const [branchName, setBranchName] = React.useState('');
+
+  const handleRightClick = (e: React.MouseEvent, message: Message) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenuPos({ x: e.clientX, y: e.clientY });
+    setContextMenuMessage(message);
+    setShowContextMenu(true);
+  };
+
+  const handleCreateBranch = () => {
+    if (branchName.trim() && contextMenuMessage) {
+      onCreateBranch(contextMenuMessage.id, branchName.trim());
+      setShowBranchDialog(false);
+      setBranchName('');
+      setShowContextMenu(false);
+      setContextMenuMessage(null);
+    }
+  };
 
   const getBranchColor = (branchName: string) => {
     const colors = {
@@ -116,6 +143,9 @@ const TreeView: React.FC<TreeViewProps> = ({
             <div 
               className={`tree-node ${message.role} ${selectedMessage === message.id ? 'selected' : ''}`}
               onClick={() => onMessageSelect(message.id)}
+              onDoubleClick={() => onSwitchToChatView(message.branch_name, message.id)}
+              onContextMenu={(e) => message.role === 'assistant' ? handleRightClick(e, message) : undefined}
+              title={message.role === 'assistant' ? "Double-click to open chat view for this branch. Right-click to create branch." : "Double-click to open chat view for this branch"}
             >
               <div className="tree-node-header">
                 <span className="role-badge">{message.role}</span>
@@ -186,6 +216,114 @@ const TreeView: React.FC<TreeViewProps> = ({
         <MiniMap />
         <Background variant={BackgroundVariant.Dots} gap={12} size={1} />
       </ReactFlow>
+
+      {/* Context Menu */}
+      {showContextMenu && (
+        <>
+          <div 
+            className="context-menu-overlay" 
+            onClick={() => setShowContextMenu(false)}
+            style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              zIndex: 1000
+            }}
+          />
+          <div 
+            className="context-menu"
+            style={{ 
+              position: 'fixed',
+              left: contextMenuPos.x, 
+              top: contextMenuPos.y,
+              zIndex: 1001,
+              background: 'white',
+              border: '1px solid #ccc',
+              borderRadius: '4px',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+              padding: '8px 0'
+            }}
+          >
+            <button 
+              onClick={() => {
+                setShowContextMenu(false);
+                setShowBranchDialog(true);
+                setBranchName(`Branch-${Date.now()}`);
+              }}
+              style={{
+                width: '100%',
+                padding: '8px 16px',
+                border: 'none',
+                background: 'none',
+                textAlign: 'left',
+                cursor: 'pointer'
+              }}
+            >
+              🌿 Create Branch Here
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* Branch Creation Dialog */}
+      {showBranchDialog && contextMenuMessage && (
+        <div className="modal-overlay" style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1002
+        }}>
+          <div className="modal" style={{
+            background: 'white',
+            padding: '24px',
+            borderRadius: '8px',
+            minWidth: '400px',
+            maxWidth: '600px'
+          }}>
+            <h3>Create New Branch</h3>
+            <p>Branching from: "{contextMenuMessage.content.substring(0, 50)}..."</p>
+            <input
+              type="text"
+              placeholder="Enter branch name"
+              value={branchName}
+              onChange={(e) => setBranchName(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && handleCreateBranch()}
+              autoFocus
+              style={{
+                width: '100%',
+                padding: '8px',
+                marginBottom: '16px',
+                border: '1px solid #ccc',
+                borderRadius: '4px'
+              }}
+            />
+            <div className="modal-buttons">
+              <button 
+                onClick={handleCreateBranch} 
+                disabled={!branchName.trim()}
+                style={{ marginRight: '8px' }}
+              >
+                Create Branch
+              </button>
+              <button onClick={() => {
+                setShowBranchDialog(false);
+                setBranchName('');
+                setContextMenuMessage(null);
+              }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

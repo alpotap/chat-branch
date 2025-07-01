@@ -24,8 +24,59 @@ class ConversationService:
         """Get conversation by ID"""
         return db.query(Conversation).filter(Conversation.id == conversation_id).first()
     
+    def list_conversations(self, db: Session) -> List[Conversation]:
+        """Get all conversations ordered by creation date (newest first)"""
+        return db.query(Conversation).order_by(Conversation.created_at.desc()).all()
+    
+    def delete_conversation(self, db: Session, conversation_id: str) -> bool:
+        """Delete a conversation and all its related data"""
+        conversation = self.get_conversation(db, conversation_id)
+        if not conversation:
+            return False
+        
+        try:
+            # Important: Delete in correct order to avoid foreign key violations
+            
+            # 1. First delete all branches (they reference messages)
+            branches_deleted = db.query(Branch).filter(Branch.conversation_id == conversation_id).delete()
+            print(f"🗑️ Deleted {branches_deleted} branches")
+            
+            # 2. Then delete all messages (they reference other messages via parent_id)
+            messages_deleted = db.query(Message).filter(Message.conversation_id == conversation_id).delete()
+            print(f"🗑️ Deleted {messages_deleted} messages")
+            
+            # 3. Finally delete the conversation itself
+            db.delete(conversation)
+            
+            # Commit all changes
+            db.commit()
+            print(f"✅ Successfully deleted conversation {conversation_id}")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Error deleting conversation {conversation_id}: {e}")
+            db.rollback()
+            raise e
+    
     def add_message(self, db: Session, conversation_id: str, message: MessageCreate) -> Message:
         """Add a message to a conversation"""
+        
+        # Validate conversation exists
+        conversation = self.get_conversation(db, conversation_id)
+        if not conversation:
+            raise ValueError(f"Conversation {conversation_id} not found")
+        
+        # Validate parent message if specified
+        if message.parent_id:
+            parent_message = db.query(Message).filter(
+                Message.id == message.parent_id,
+                Message.conversation_id == conversation_id  # Ensure parent is in same conversation
+            ).first()
+            if not parent_message:
+                print(f"⚠️  Invalid parent_id {message.parent_id} for conversation {conversation_id}")
+                # Rather than failing, we'll set parent_id to None
+                message.parent_id = None
+        
         db_message = Message(
             conversation_id=conversation_id,
             content=message.content,
@@ -35,6 +86,9 @@ class ConversationService:
             llm_model=message.llm_model,
             created_at=datetime.utcnow()
         )
+        
+        print(f"💬 Adding message to conversation {conversation_id}: {message.role} in branch '{message.branch_name or 'main'}'")
+        
         db.add(db_message)
         db.commit()
         db.refresh(db_message)
@@ -90,8 +144,12 @@ class ConversationService:
         if not conversation:
             raise ValueError("Conversation not found")
         
-        # Get all messages
+        # Get all messages for this specific conversation
         messages = db.query(Message).filter(Message.conversation_id == conversation_id).all()
+        
+        # Debug logging
+        print(f"🔍 Building tree for conversation {conversation_id}")
+        print(f"📊 Found {len(messages)} messages")
         
         # Build message nodes dictionary
         message_nodes = {}
@@ -106,19 +164,33 @@ class ConversationService:
                 children=[]
             )
         
-        # Build parent-child relationships
+        # Build parent-child relationships with validation
         root_messages = []
+        orphaned_messages = []
+        
         for msg in messages:
             if msg.parent_id:
                 parent_node = message_nodes.get(str(msg.parent_id))
                 if parent_node:
                     parent_node.children.append(message_nodes[str(msg.id)])
+                else:
+                    # Parent ID references a message that doesn't exist or is in a different conversation
+                    print(f"⚠️  Message {msg.id} has invalid parent_id {msg.parent_id}")
+                    orphaned_messages.append(str(msg.id))
+                    # Treat as root message for now
+                    root_messages.append(msg.id)
             else:
                 root_messages.append(msg.id)
+        
+        # Debug output
+        print(f"🌱 Root messages: {len(root_messages)}")
+        print(f"🔗 Orphaned messages: {len(orphaned_messages)}")
         
         # Get branches
         branches = self.get_branches(db, conversation_id)
         branch_responses = [BranchResponse.from_orm(branch) for branch in branches]
+        
+        print(f"🌿 Branches: {len(branches)}")
         
         return ConversationTree(
             conversation=ConversationResponse.from_orm(conversation),
@@ -126,6 +198,90 @@ class ConversationService:
             branches=branch_responses,
             root_messages=root_messages
         )
+    
+    def validate_conversation_integrity(self, db: Session, conversation_id: str) -> Dict:
+        """Validate conversation integrity and return diagnostic information"""
+        conversation = self.get_conversation(db, conversation_id)
+        if not conversation:
+            return {"error": "Conversation not found"}
+        
+        # Get all messages
+        messages = db.query(Message).filter(Message.conversation_id == conversation_id).all()
+        
+        diagnostics = {
+            "conversation_id": conversation_id,
+            "total_messages": len(messages),
+            "message_details": [],
+            "orphaned_messages": [],
+            "invalid_parent_refs": [],
+            "branches": {},
+            "root_messages": []
+        }
+        
+        # Check each message
+        message_ids = {str(msg.id) for msg in messages}
+        
+        for msg in messages:
+            msg_info = {
+                "id": str(msg.id),
+                "role": msg.role,
+                "branch_name": msg.branch_name,
+                "parent_id": str(msg.parent_id) if msg.parent_id else None,
+                "has_valid_parent": True,
+                "content_preview": msg.content[:50] + "..." if len(msg.content) > 50 else msg.content
+            }
+            
+            # Check parent validity
+            if msg.parent_id:
+                if str(msg.parent_id) not in message_ids:
+                    msg_info["has_valid_parent"] = False
+                    diagnostics["invalid_parent_refs"].append(msg_info)
+            else:
+                diagnostics["root_messages"].append(str(msg.id))
+            
+            # Group by branch
+            if msg.branch_name not in diagnostics["branches"]:
+                diagnostics["branches"][msg.branch_name] = []
+            diagnostics["branches"][msg.branch_name].append(str(msg.id))
+            
+            diagnostics["message_details"].append(msg_info)
+        
+        # Find orphaned messages (messages that should have parents but don't)
+        for msg in messages:
+            if not msg.parent_id and msg.role == 'assistant':
+                # Assistant messages should usually have parent user messages
+                # (except for initial assistant messages in some edge cases)
+                diagnostics["orphaned_messages"].append({
+                    "id": str(msg.id),
+                    "role": msg.role,
+                    "branch_name": msg.branch_name,
+                    "reason": "Assistant message without parent"
+                })
+        
+        return diagnostics
+
+    def fix_conversation_integrity(self, db: Session, conversation_id: str) -> Dict:
+        """Attempt to fix common conversation integrity issues"""
+        diagnostics = self.validate_conversation_integrity(db, conversation_id)
+        
+        fixes_applied = []
+        
+        # Fix 1: Remove messages with invalid parent references
+        if diagnostics["invalid_parent_refs"]:
+            for invalid_msg in diagnostics["invalid_parent_refs"]:
+                # Option 1: Set parent_id to null (make it a root message)
+                # Option 2: Delete the message (more aggressive)
+                # For now, we'll set parent_id to null
+                db.query(Message).filter(Message.id == invalid_msg["id"]).update({"parent_id": None})
+                fixes_applied.append(f"Fixed invalid parent ref for message {invalid_msg['id']}")
+        
+        if fixes_applied:
+            db.commit()
+        
+        return {
+            "fixes_applied": fixes_applied,
+            "diagnostics_after_fix": self.validate_conversation_integrity(db, conversation_id)
+        }
 
 
 import random

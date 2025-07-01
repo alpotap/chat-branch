@@ -46,6 +46,14 @@ async def create_conversation(
     db_conversation = conversation_service.create_conversation(db, conversation)
     return db_conversation
 
+@app.get("/conversations", response_model=List[ConversationResponse])
+async def list_conversations(
+    db: Session = Depends(get_db)
+):
+    """Get all conversations"""
+    conversations = conversation_service.list_conversations(db)
+    return [ConversationResponse.from_orm(conv) for conv in conversations]
+
 @app.get("/conversations/{conversation_id}", response_model=ConversationTree)
 async def get_conversation(
     conversation_id: str,
@@ -58,6 +66,19 @@ async def get_conversation(
     
     tree = conversation_service.build_conversation_tree(db, conversation_id)
     return tree
+
+@app.delete("/conversations/{conversation_id}")
+async def delete_conversation(
+    conversation_id: str,
+    db: Session = Depends(get_db)
+):
+    """Delete a conversation and all its messages and branches"""
+    conversation = conversation_service.get_conversation(db, conversation_id)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    
+    conversation_service.delete_conversation(db, conversation_id)
+    return {"message": "Conversation deleted successfully"}
 
 @app.post("/conversations/{conversation_id}/messages", response_model=MessageResponse)
 async def add_message(
@@ -127,6 +148,24 @@ async def get_branches(
     """Get all branches in a conversation"""
     branches = conversation_service.get_branches(db, conversation_id)
     return {"branches": branches}
+
+@app.get("/conversations/{conversation_id}/debug")
+async def debug_conversation(
+    conversation_id: str,
+    db: Session = Depends(get_db)
+):
+    """Debug conversation integrity issues"""
+    diagnostics = conversation_service.validate_conversation_integrity(db, conversation_id)
+    return diagnostics
+
+@app.post("/conversations/{conversation_id}/fix")
+async def fix_conversation(
+    conversation_id: str,
+    db: Session = Depends(get_db)
+):
+    """Attempt to fix conversation integrity issues"""
+    result = conversation_service.fix_conversation_integrity(db, conversation_id)
+    return result
 
 if __name__ == "__main__":
     import uvicorn

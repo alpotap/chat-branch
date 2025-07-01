@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import TreeView from './TreeView';
 import MessageBubble from './MessageBubble';
+import ConversationDebugger from './ConversationDebugger';
 import './App.css';
 
 interface Message {
@@ -36,9 +37,86 @@ const App: React.FC = () => {
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const [selectedModel, setSelectedModel] = useState('gpt-3.5-turbo');
-  const [viewMode, setViewMode] = useState<'chat' | 'tree'>('chat');
+  const [viewMode, setViewMode] = useState<'chat' | 'tree' | 'debug'>('chat');
+  const [messagesPerPage] = useState(20); // Show 20 messages initially
+  const [showAllMessages, setShowAllMessages] = useState(false);
+  const [debugMode, setDebugMode] = useState(false);
 
   const API_BASE = 'http://localhost:8000';
+
+  // Load all conversations from backend
+  const loadConversations = useCallback(async () => {
+    try {
+      const response = await axios.get(`${API_BASE}/conversations`);
+      setConversations(response.data);
+    } catch (error) {
+      console.error('Error loading conversations:', error);
+    }
+  }, []);
+
+  // Load conversation
+  const loadConversation = useCallback(async (conversationId: string) => {
+    try {
+      const response = await axios.get(`${API_BASE}/conversations/${conversationId}`);
+      const tree: ConversationTree = response.data;
+      setCurrentConversation(tree.conversation);
+      setConversationTree(tree);
+      
+      // Auto-select the last message in the current branch
+      const branchMessages = getBranchMessages(tree.messages, tree.root_messages, currentBranch);
+      if (branchMessages.length > 0) {
+        setSelectedMessage(branchMessages[branchMessages.length - 1].id);
+      }
+    } catch (error) {
+      console.error('Error loading conversation:', error);
+    }
+  }, [currentBranch]); // Remove getBranchMessages to avoid dependency ordering issues
+
+  // Load saved state from localStorage
+  const loadSavedState = useCallback(async () => {
+    try {
+      const savedState = localStorage.getItem('chatbranch-state');
+      if (savedState) {
+        const { conversationId, branch, selectedMessage, viewMode } = JSON.parse(savedState);
+        if (conversationId) {
+          // Load the conversation and restore state
+          await loadConversation(conversationId);
+          setCurrentBranch(branch || 'main');
+          setSelectedMessage(selectedMessage || null);
+          // Only restore chat/tree view modes, not debug
+          setViewMode((viewMode === 'debug') ? 'chat' : viewMode || 'chat');
+        }
+      }
+    } catch (error) {
+      console.error('Error loading saved state:', error);
+    }
+  }, [loadConversation]); // Add loadConversation dependency
+
+  // Load conversations and saved state on app start
+  useEffect(() => {
+    const initializeApp = async () => {
+      await loadConversations();
+      await loadSavedState();
+      
+      // Check for debug mode in URL
+      const urlParams = new URLSearchParams(window.location.search);
+      setDebugMode(urlParams.get('debug') === 'true');
+    };
+    initializeApp();
+  }, [loadConversations, loadSavedState]);
+
+  // Save state to localStorage whenever important state changes
+  useEffect(() => {
+    if (currentConversation) {
+      const state = {
+        conversationId: currentConversation.id,
+        branch: currentBranch,
+        selectedMessage,
+        viewMode
+      };
+      localStorage.setItem('chatbranch-state', JSON.stringify(state));
+    }
+  }, [currentConversation, currentBranch, selectedMessage, viewMode]);
 
   // Create new conversation
   const createConversation = async () => {
@@ -57,78 +135,70 @@ const App: React.FC = () => {
     }
   };
 
-  // Load conversation
-  const loadConversation = async (conversationId: string) => {
-    try {
-      const response = await axios.get(`${API_BASE}/conversations/${conversationId}`);
-      const tree: ConversationTree = response.data;
-      setCurrentConversation(tree.conversation);
-      setConversationTree(tree);
-      
-      // Auto-select the last message in the current branch
-      const branchMessages = getBranchMessages(tree.messages, tree.root_messages, currentBranch);
-      if (branchMessages.length > 0) {
-        setSelectedMessage(branchMessages[branchMessages.length - 1].id);
-      }
-    } catch (error) {
-      console.error('Error loading conversation:', error);
-    }
-  };
-
-  // Get messages for a specific branch in chronological order
+  // Get messages for a specific branch showing full conversation path
   const getBranchMessages = (messages: { [key: string]: Message }, rootIds: string[], branchName: string): Message[] => {
-    const branchMessages: Message[] = [];
-    
-    const traverse = (messageId: string) => {
-      const message = messages[messageId];
-      if (message && message.branch_name === branchName) {
-        branchMessages.push(message);
-        // For chat view, only follow the first child in the same branch
-        const samebranchChildren = message.children.filter(child => 
-          messages[child.id]?.branch_name === branchName
-        );
-        if (samebranchChildren.length > 0) {
-          traverse(samebranchChildren[0].id);
-        }
-      }
-    };
-
-    rootIds.forEach(rootId => {
-      if (messages[rootId]?.branch_name === branchName) {
-        traverse(rootId);
-      }
+    // Build a map to find parent relationships
+    const parentMap = new Map<string, string>();
+    Object.values(messages).forEach(msg => {
+      msg.children.forEach(child => {
+        parentMap.set(child.id, msg.id);
+      });
     });
     
-    return branchMessages.sort((a, b) => 
+    // Find all messages in the current branch
+    const branchMessages = Object.values(messages).filter(msg => msg.branch_name === branchName);
+    
+    if (branchMessages.length === 0) return [];
+    
+    // Get the conversation path for the branch
+    // Start from the earliest message in the branch and trace back to root
+    const sortedBranchMessages = branchMessages.sort((a, b) => 
       new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
     );
-  };
-
-  // Get the context chain for a specific message
-  const getMessageContext = (messageId: string): Message[] => {
-    if (!conversationTree) return [];
     
-    const context: Message[] = [];
-    let currentId: string | null = messageId;
+    // Build the full conversation path
+    const conversationPath: Message[] = [];
     
-    while (currentId) {
-      const message = conversationTree.messages[currentId];
-      if (message) {
-        context.unshift(message);
-        // Find parent by looking for message that has this one as child
-        let parentId: string | null = null;
-        Object.values(conversationTree.messages).forEach(msg => {
-          if (msg.children.some(child => child.id === currentId)) {
-            parentId = msg.id;
-          }
-        });
-        currentId = parentId;
-      } else {
-        break;
+    // If this is not the main branch, we need to include the path from root to branch point
+    if (branchName !== 'main') {
+      // Find where this branch started (the message that has children in this branch)
+      const branchPoint: Message | null = Object.values(messages).find(msg => {
+        if (msg.branch_name !== branchName) {
+          const hasBranchChildren = msg.children.some(child => 
+            messages[child.id]?.branch_name === branchName
+          );
+          return hasBranchChildren;
+        }
+        return false;
+      }) || null;
+      
+      // If we found the branch point, trace back to root
+      if (branchPoint) {
+        const pathToRoot: Message[] = [];
+        let currentMsg: Message | null = branchPoint;
+        
+        while (currentMsg) {
+          pathToRoot.unshift(currentMsg);
+          const parentId = parentMap.get(currentMsg.id);
+          currentMsg = parentId ? messages[parentId] : null;
+        }
+        
+        conversationPath.push(...pathToRoot);
       }
     }
     
-    return context;
+    // Add all messages from the current branch
+    conversationPath.push(...sortedBranchMessages);
+    
+    // Remove duplicates (in case branch point was already added)
+    const uniqueMessages = conversationPath.filter((msg, index, arr) => 
+      arr.findIndex(m => m.id === msg.id) === index
+    );
+    
+    // Sort the final result by creation time
+    return uniqueMessages.sort((a, b) => 
+      new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    );
   };
 
   // Send message
@@ -140,7 +210,7 @@ const App: React.FC = () => {
       await axios.post(`${API_BASE}/conversations/${currentConversation.id}/messages`, {
         content: newMessage,
         role: 'user',
-        llm_model: selectedModel,
+        llm_model: selectedModel, // Always use current selected model
         branch_name: branchName || currentBranch,
         parent_id: parentMessageId || selectedMessage
       });
@@ -211,10 +281,57 @@ const App: React.FC = () => {
     }
   };
 
+  // Switch to chat view with specific branch
+  const handleSwitchToChatView = (branchName: string, messageId: string) => {
+    setCurrentBranch(branchName);
+    setSelectedMessage(messageId);
+    setViewMode('chat');
+  };
+
+  // Clear conversation history
+  const deleteConversation = async () => {
+    if (!currentConversation) return;
+    
+    if (window.confirm(`Are you sure you want to clear the history for "${currentConversation.title}"? This cannot be undone.`)) {
+      try {
+        // Delete from backend
+        await axios.delete(`${API_BASE}/conversations/${currentConversation.id}`);
+        
+        // Remove from frontend state
+        const updatedConversations = conversations.filter(conv => conv.id !== currentConversation.id);
+        setConversations(updatedConversations);
+        
+        // Clear current state
+        setCurrentConversation(null);
+        setConversationTree(null);
+        setSelectedMessage(null);
+        setCurrentBranch('main');
+        setShowAllMessages(false);
+        
+        // Clear localStorage if this was the active conversation
+        localStorage.removeItem('chatbranch-state');
+        
+        console.log('✅ Conversation history cleared successfully');
+      } catch (error) {
+        console.error('Error deleting conversation:', error);
+        alert('Failed to clear conversation history. Please try again.');
+      }
+    }
+  };
+
   // Get current branch messages for chat view
-  const currentBranchMessages = conversationTree 
+  const allBranchMessages = conversationTree 
     ? getBranchMessages(conversationTree.messages, conversationTree.root_messages, currentBranch)
     : [];
+  
+  const currentBranchMessages = showAllMessages 
+    ? allBranchMessages 
+    : allBranchMessages.slice(-messagesPerPage);
+
+  // Paginated messages for chat view
+  const paginatedMessages = showAllMessages 
+    ? currentBranchMessages 
+    : currentBranchMessages.slice(0, messagesPerPage);
 
   return (
     <div className="App">
@@ -222,6 +339,22 @@ const App: React.FC = () => {
         <h1>🌳 ChatBranch</h1>
         <div className="controls">
           <button onClick={createConversation}>New Conversation</button>
+          
+          {/* Clear History Button */}
+          {currentConversation && (
+            <button 
+              onClick={deleteConversation}
+              className="clear-history-btn"
+              style={{ 
+                backgroundColor: '#dc3545', 
+                color: 'white',
+                border: '1px solid #dc3545'
+              }}
+              title="Clear conversation history"
+            >
+              🗑️ Clear History
+            </button>
+          )}
           
           {/* Branch selector */}
           {currentConversation && (
@@ -251,6 +384,14 @@ const App: React.FC = () => {
               >
                 🌳 Tree
               </button>
+              {debugMode && (
+                <button 
+                  className={viewMode === 'debug' ? 'active' : ''}
+                  onClick={() => setViewMode('debug')}
+                >
+                  🔍 Debug
+                </button>
+              )}
             </div>
           )}
           
@@ -289,8 +430,14 @@ const App: React.FC = () => {
                     messages={conversationTree.messages}
                     rootMessages={conversationTree.root_messages}
                     onMessageSelect={handleMessageSelect}
+                    onSwitchToChatView={handleSwitchToChatView}
+                    onCreateBranch={createBranch}
                     selectedMessage={selectedMessage || undefined}
                   />
+                </div>
+              ) : viewMode === 'debug' && debugMode ? (
+                <div className="debug-container">
+                  <ConversationDebugger />
                 </div>
               ) : (
                 <div className="chat-container">
@@ -302,7 +449,7 @@ const App: React.FC = () => {
                   </div>
                   
                   <div className="messages">
-                    {currentBranchMessages.map((message, index) => (
+                    {paginatedMessages.map((message, index) => (
                       <MessageBubble
                         key={message.id}
                         message={message}
@@ -313,6 +460,15 @@ const App: React.FC = () => {
                       />
                     ))}
                   </div>
+
+                  {/* Show more / less button */}
+                  {currentBranchMessages.length > messagesPerPage && (
+                    <div className="pagination-controls">
+                      <button onClick={() => setShowAllMessages(!showAllMessages)}>
+                        {showAllMessages ? 'Show Less' : 'Show All'}
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
 
