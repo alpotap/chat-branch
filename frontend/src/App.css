@@ -15,6 +15,50 @@
   box-shadow: 0 2px 10px rgba(0,0,0,0.1);
 }
 
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.navigation-buttons {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.undo-btn, .redo-btn {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background-color: rgba(255,255,255,0.2);
+  color: white;
+  border: 1px solid rgba(255,255,255,0.3);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.undo-btn:not(.disabled):hover {
+  background-color: rgba(255,255,255,0.3);
+  transform: translateX(-2px);
+}
+
+.redo-btn:not(.disabled):hover {
+  background-color: rgba(255,255,255,0.3);
+  transform: translateX(2px);
+}
+
+.undo-btn.disabled, .redo-btn.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+}
+
 .header h1 {
   margin: 0;
   font-size: 1.8rem;
@@ -53,6 +97,16 @@
   background-color: rgba(255,255,255,0.1);
   color: white;
   min-width: 120px;
+}
+
+.branch-selector option, .controls select option {
+  background-color: #333;
+  color: white;
+  padding: 0.5rem;
+}
+
+.branch-selector option:hover, .controls select option:hover {
+  background-color: #555;
 }
 
 .view-toggle {

@@ -130,6 +130,10 @@ dmypy.json
 /.pnp
 pnp.js
 
+# TypeScript build info
+*.tsbuildinfo
+.tsbuildinfo
+
 # testing
 /coverage
 

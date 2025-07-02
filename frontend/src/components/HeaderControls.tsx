@@ -11,6 +11,10 @@ interface HeaderControlsProps {
   selectedModel: string;
   onModelChange: (model: string) => void;
   debugMode: boolean;
+  canGoBack: boolean;
+  onGoBack: () => void;
+  canGoForward: boolean;
+  onGoForward: () => void;
 }
 
 const HeaderControls = memo(({
@@ -23,7 +27,11 @@ const HeaderControls = memo(({
   onViewModeChange,
   selectedModel,
   onModelChange,
-  debugMode
+  debugMode,
+  canGoBack,
+  onGoBack,
+  canGoForward,
+  onGoForward
 }: HeaderControlsProps) => {
   const handleModelChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
     onModelChange(e.target.value);
@@ -35,7 +43,27 @@ const HeaderControls = memo(({
 
   return (
     <div className="header">
-      <h1>🌳 ChatBranch</h1>
+      <div className="header-left">
+        <h1>🌳 ChatBranch</h1>
+        <div className="navigation-buttons">
+          <button 
+            onClick={onGoBack}
+            className={`undo-btn ${!canGoBack ? 'disabled' : ''}`}
+            disabled={!canGoBack}
+            title={canGoBack ? "Undo last action" : "Nothing to undo"}
+          >
+            ◀
+          </button>
+          <button 
+            onClick={onGoForward}
+            className={`redo-btn ${!canGoForward ? 'disabled' : ''}`}
+            disabled={!canGoForward}
+            title={canGoForward ? "Redo last action" : "Nothing to redo"}
+          >
+            ▶
+          </button>
+        </div>
+      </div>
       <div className="controls">
         {/* Branch selector with delete button */}
         {currentConversation && (
