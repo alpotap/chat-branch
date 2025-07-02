@@ -85,7 +85,7 @@ ChatBranch/
 ## Development
 
 - **Test API:** `python test_api.py`
-- **Backend:** http://localhost:8000 (FastAPI auto-docs at /docs)
+- **Backend:** http://localhost:8001 (FastAPI auto-docs at /docs)
 - **Frontend:** http://localhost:3000
 - **Database:** PostgreSQL with tree-structured message storage
 

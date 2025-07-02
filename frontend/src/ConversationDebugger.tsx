@@ -16,7 +16,7 @@ const ConversationDebugger: React.FC = () => {
   const [conversationId, setConversationId] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const API_BASE = 'http://localhost:8000';
+  const API_BASE = 'http://localhost:8001';
 
   const debugConversation = async () => {
     if (!conversationId.trim()) return;

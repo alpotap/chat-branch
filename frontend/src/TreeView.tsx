@@ -12,6 +12,7 @@ import ReactFlow, {
   MiniMap,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
+import { getBranchColor } from './utils/branchColors';
 
 interface Message {
   id: string;
@@ -40,8 +41,8 @@ const TreeView: React.FC<TreeViewProps> = ({
   onCreateBranch,
   selectedMessage 
 }) => {
-  const [nodes, setNodes, onNodesChange] = useNodesState([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [, , onNodesChange] = useNodesState([]);
+  const [, setEdges, onEdgesChange] = useEdgesState([]);
   const [showContextMenu, setShowContextMenu] = React.useState(false);
   const [contextMenuPos, setContextMenuPos] = React.useState({ x: 0, y: 0 });
   const [contextMenuMessage, setContextMenuMessage] = React.useState<Message | null>(null);
@@ -66,23 +67,6 @@ const TreeView: React.FC<TreeViewProps> = ({
     }
   };
 
-  const getBranchColor = (branchName: string) => {
-    const colors = {
-      'main': '#3B82F6',
-      'alternative': '#10B981',
-      'exploration': '#F59E0B',
-      'comparison': '#EF4444',
-    };
-    
-    let hash = 0;
-    for (let i = 0; i < branchName.length; i++) {
-      hash = branchName.charCodeAt(i) + ((hash << 5) - hash);
-    }
-    const colorKeys = Object.keys(colors);
-    const colorKey = colorKeys[Math.abs(hash) % colorKeys.length];
-    return colors[colorKey as keyof typeof colors] || '#6B7280';
-  };
-
   const { flowNodes, flowEdges } = useMemo(() => {
     const nodes: Node[] = [];
     const edges: Edge[] = [];
@@ -100,10 +84,21 @@ const TreeView: React.FC<TreeViewProps> = ({
       
       let currentX = x;
       const childSpacing = 300;
-      const levelHeight = 150;
       
       const children = message.children || [];
       children.forEach((child, index) => {
+        const childMessage = messages[child.id];
+        // Normal distance between user query and AI response
+        // Slightly larger distance between AI response and next user query
+        let levelHeight;
+        if (message.role === 'user' && childMessage?.role === 'assistant') {
+          levelHeight = 140; // Normal spacing: user -> AI
+        } else if (message.role === 'assistant' && childMessage?.role === 'user') {
+          levelHeight = 180; // Slightly larger spacing: AI -> next user
+        } else {
+          levelHeight = 160; // Default spacing
+        }
+        
         const childX = currentX;
         currentX = calculatePositions(child.id, childX, y + levelHeight, visited);
         if (index < children.length - 1) {
@@ -193,7 +188,7 @@ const TreeView: React.FC<TreeViewProps> = ({
     });
 
     return { flowNodes: nodes, flowEdges: edges };
-  }, [messages, rootMessages, selectedMessage, onMessageSelect]);
+  }, [messages, rootMessages, selectedMessage, onMessageSelect, onSwitchToChatView]);
 
   const onConnect = useCallback(
     (params: any) => setEdges((eds) => addEdge(params, eds)),

@@ -96,7 +96,7 @@ Visit: <http://localhost:3000>
 2. **Continue conversation** with new model
 ## API Endpoints (for Postman testing)
 
-**Base URL**: `http://localhost:8000`
+**Base URL**: `http://localhost:8001`
 
 ### Create Conversation
 ```http

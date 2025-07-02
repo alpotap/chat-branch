@@ -167,6 +167,90 @@ async def fix_conversation(
     result = conversation_service.fix_conversation_integrity(db, conversation_id)
     return result
 
+@app.put("/conversations/{conversation_id}/rename")
+async def rename_conversation(
+    conversation_id: str,
+    new_title: str,
+    db: Session = Depends(get_db)
+):
+    """Rename a conversation"""
+    conversation = conversation_service.get_conversation(db, conversation_id)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    
+    conversation.title = new_title
+    db.commit()
+    return {"message": "Conversation renamed successfully", "new_title": new_title}
+
+@app.put("/conversations/{conversation_id}/branches/{branch_name}/rename")
+async def rename_branch(
+    conversation_id: str,
+    branch_name: str,
+    new_branch_name: str,
+    db: Session = Depends(get_db)
+):
+    """Rename a branch and update all messages in that branch"""
+    # Check if conversation exists
+    conversation = conversation_service.get_conversation(db, conversation_id)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    
+    # Update all messages in the branch
+    messages = db.query(Message).filter(
+        Message.conversation_id == conversation_id,
+        Message.branch_name == branch_name
+    ).all()
+    
+    if not messages:
+        raise HTTPException(status_code=404, detail="Branch not found")
+    
+    for message in messages:
+        message.branch_name = new_branch_name
+    
+    db.commit()
+    return {"message": "Branch renamed successfully", "old_name": branch_name, "new_name": new_branch_name}
+
+@app.delete("/conversations/{conversation_id}/branches/{branch_name}")
+async def delete_branch(
+    conversation_id: str,
+    branch_name: str,
+    db: Session = Depends(get_db)
+):
+    """Delete a branch and all its messages"""
+    # Check if conversation exists
+    conversation = conversation_service.get_conversation(db, conversation_id)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    
+    # Cannot delete main branch
+    if branch_name == "main":
+        raise HTTPException(status_code=400, detail="Cannot delete main branch")
+    
+    # Delete all messages in the branch
+    messages = db.query(Message).filter(
+        Message.conversation_id == conversation_id,
+        Message.branch_name == branch_name
+    ).all()
+    
+    if not messages:
+        raise HTTPException(status_code=404, detail="Branch not found")
+    
+    for message in messages:
+        db.delete(message)
+    
+    # Delete the branch record
+    branch_record = db.query(Branch).filter(
+        Branch.conversation_id == conversation_id,
+        Branch.name == branch_name
+    ).first()
+    
+    if branch_record:
+        db.delete(branch_record)
+    
+    db.commit()
+    
+    return {"message": "Branch deleted successfully", "branch_name": branch_name}
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8001)

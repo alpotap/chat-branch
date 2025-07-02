@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { v4 as uuidv4 } from 'uuid';
+import React, { useState, memo, useCallback } from 'react';
+import { getBranchColor as getUtilBranchColor, getRandomBranchColor, BRANCH_COLORS } from './utils/branchColors';
 
 interface Message {
   id: string;
@@ -13,16 +13,18 @@ interface Message {
 
 interface MessageBubbleProps {
   message: Message;
-  onBranch: (messageId: string, branchName: string) => void;
+  onBranch: (messageId: string, branchName: string, color?: string) => void;
   onSelectMessage: (messageId: string) => void;
+  onBranchSwitch: (messageId: string) => void;
   isSelected: boolean;
   depth: number;
 }
 
-const MessageBubble: React.FC<MessageBubbleProps> = ({ 
+const MessageBubble = memo<MessageBubbleProps>(({ 
   message, 
   onBranch, 
   onSelectMessage, 
+  onBranchSwitch,
   isSelected,
   depth 
 }) => {
@@ -30,8 +32,9 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
   const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 });
   const [showBranchDialog, setShowBranchDialog] = useState(false);
   const [branchName, setBranchName] = useState('');
+  const [branchColor, setBranchColor] = useState('#3B82F6');
 
-  const handleRightClick = (e: React.MouseEvent) => {
+  const handleRightClick = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     // Only allow branching from assistant messages
     if (message.role !== 'assistant') {
@@ -39,42 +42,35 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
     }
     setContextMenuPos({ x: e.clientX, y: e.clientY });
     setShowContextMenu(true);
-  };
+  }, [message.role]);
 
-  const handleBranchClick = () => {
+  const handleBranchClick = useCallback(() => {
     setShowContextMenu(false);
     setShowBranchDialog(true);
     setBranchName(`Branch-${Date.now()}`);
-  };
+    setBranchColor(getRandomBranchColor()); // Set random color as default
+  }, []);
 
-  const handleCreateBranch = () => {
+  const handleCreateBranch = useCallback(() => {
     if (branchName.trim()) {
-      onBranch(message.id, branchName.trim());
+      onBranch(message.id, branchName.trim(), branchColor);
       setShowBranchDialog(false);
       setBranchName('');
+      setBranchColor('#3B82F6');
     }
-  };
+  }, [branchName, branchColor, message.id, onBranch]);
 
-  const handleClick = () => {
+  const handleClick = useCallback(() => {
     onSelectMessage(message.id);
-  };
+  }, [message.id, onSelectMessage]);
+
+  const handleBranchTagClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent the message click from firing
+    onBranchSwitch(message.id);
+  }, [message.id, onBranchSwitch]);
 
   const getBranchColor = (branchName: string) => {
-    const colors = {
-      'main': '#3B82F6',
-      'alternative': '#10B981',
-      'exploration': '#F59E0B',
-      'comparison': '#EF4444',
-    };
-    
-    // Simple hash function for consistent colors
-    let hash = 0;
-    for (let i = 0; i < branchName.length; i++) {
-      hash = branchName.charCodeAt(i) + ((hash << 5) - hash);
-    }
-    const colorKeys = Object.keys(colors);
-    const colorKey = colorKeys[Math.abs(hash) % colorKeys.length];
-    return colors[colorKey as keyof typeof colors] || '#6B7280';
+    return getUtilBranchColor(branchName);
   };
 
   return (
@@ -94,6 +90,8 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
           <span 
             className="branch-tag" 
             style={{ backgroundColor: getBranchColor(message.branch_name) }}
+            onClick={handleBranchTagClick}
+            title="Click to switch to this branch"
           >
             {message.branch_name}
           </span>
@@ -140,6 +138,31 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
               onKeyPress={(e) => e.key === 'Enter' && handleCreateBranch()}
               autoFocus
             />
+            <div className="color-selection">
+              <label>Branch Color:</label>
+              <div className="color-options">
+                <input
+                  type="color"
+                  value={branchColor}
+                  onChange={(e) => setBranchColor(e.target.value)}
+                  className="color-picker"
+                />
+                <div className="color-presets">
+                  {BRANCH_COLORS.presets.map(color => (
+                    <button
+                      key={color}
+                      className={`color-preset ${branchColor === color ? 'selected' : ''}`}
+                      style={{ backgroundColor: color }}
+                      onClick={() => setBranchColor(color)}
+                      title={color}
+                    />
+                  ))}
+                </div>
+              </div>
+              <p style={{ fontSize: '0.8rem', color: '#666', marginTop: '0.5rem' }}>
+                Current color: <span style={{ backgroundColor: branchColor, padding: '2px 8px', borderRadius: '4px', color: 'white' }}>{branchColor}</span>
+              </p>
+            </div>
             <div className="modal-buttons">
               <button onClick={handleCreateBranch} disabled={!branchName.trim()}>
                 Create Branch
@@ -153,6 +176,8 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
       )}
     </>
   );
-};
+});
+
+MessageBubble.displayName = 'MessageBubble';
 
 export default MessageBubble;
