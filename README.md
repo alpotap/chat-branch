@@ -1,96 +1,162 @@
 # ChatBranch - Git for Chat
 
-Create branching conversations with AI models - like Git, but for chat. Start a conversation, then branch off at any point to explore different directions without losing context.
+Transform your AI conversations with visual branching - like Git, but for chat. Start a conversation, then branch off at any point to explore different directions without losing context.
 
-## Features
+## What is ChatBranch?
 
-- **Visual Branching**: Right-click any message to create a new conversation branch
-- **Tree Visualization**: See your entire conversation as a visual tree with React Flow
-- **Multi-LLM Support**: Switch between GPT, Claude, and other models mid-conversation
-- **Branch Navigation**: Switch between different conversation branches seamlessly
-- **Persistent Storage**: All conversations and branches saved in PostgreSQL
-- **Demo Mode**: Test the system without using API credits
+ChatBranch lets you have non-linear conversations with AI models. Instead of a single thread of messages, you can branch your conversation at any point to explore alternative topics, approaches, or solutions. Think of it as version control for your thoughts and discussions.
 
-## Quick Start
+### Key Concepts
 
-1. **Setup:**
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # or venv\Scripts\activate on Windows
-   pip install -r requirements.txt
-   ```
+**🌳 Branching**: Create new conversation paths from any message without losing your original thread. Perfect for exploring "what if" scenarios or diving deeper into specific topics.
 
-2. **Database:**
-   ```bash
-   python database/setup.py
-   cp backend/.env.example backend/.env
-   python database/init_tables.py
-   ```
+**🎯 Navigation**: Built-in undo/redo system lets you navigate between different conversation states and branches effortlessly. Use the arrow buttons to step back and forward through your conversation history.
 
-3. **Frontend:**
-   ```bash
-   cd frontend && npm install && cd ..
-   ```
+**👁️ Visualization**: Switch between Chat view (traditional message interface) and Tree view (visual diagram) to see the full structure of your branched conversations.
 
-4. **Run:**
-   ```bash
-   # Terminal 1 - Backend
-   cd backend && uvicorn main:app --reload
-   
-   # Terminal 2 - Frontend  
-   cd frontend && npm start
-   ```
+**🤖 Multi-Model Support**: Seamlessly switch between different AI models (GPT-3.5, GPT-4, Claude) mid-conversation to compare responses or leverage different AI strengths.
 
-5. **Open:** http://localhost:3000
+## Core Features
 
-## How to Use
+### Visual Conversation Branching
+- **Right-click any message** to create a new branch from that point
+- **Name your branches** with descriptive labels for easy organization
+- **Branch colors** help distinguish different conversation paths in tree view
+- **Independent contexts** - each branch maintains its own conversation history
 
-1. Create conversations and send messages to AI models
-2. Right-click any message to create a branch from that point
-3. Switch between Chat/Tree views to see conversation structure
-4. Select different branches to continue conversations independently
-5. Change AI models anytime during conversations
+### Intelligent Navigation
+- **Undo/Redo system** for navigating between conversation states
+- **Branch switching** to jump between different conversation paths
+- **Message selection** to resume conversations from specific points
+- **Conversation persistence** - all your work is automatically saved
 
-## Configuration
+### Tree Visualization
+- **Interactive tree diagram** showing your entire conversation structure
+- **Click any message** in the tree to jump to that point
+- **Visual branch relationships** to understand conversation flow
+- **Zoom and pan** to navigate large conversation trees
 
-Edit `backend/.env`:
+### Multi-Model Integration
+- **Switch AI models** anytime during conversations
+- **Compare responses** by branching and trying different models
+- **Model-specific capabilities** - use the right AI for the right task
+- **Seamless transitions** between different AI providers
 
-```env
-# Database (created by setup script)
-DATABASE_URL=postgresql://chatbranch_user:chatbranch_password@localhost/chatbranch
+### Demo Mode
+- **Test without API costs** using built-in dummy responses
+- **Explore all features** before connecting your own API keys
+- **Perfect for learning** the branching workflow
+- **No setup required** - works out of the box
 
-# Demo mode (no API keys needed)
-USE_DUMMY_RESPONSES=true
+## How It Works
 
-# LLM API Keys (set USE_DUMMY_RESPONSES=false to use these)
-OPENAI_API_KEY=your_openai_key
-ANTHROPIC_API_KEY=your_anthropic_key
-```
+### Starting a Conversation
+1. **Create a new conversation** with a descriptive title
+2. **Type your message** and send to start the conversation
+3. **Choose your AI model** from the dropdown (GPT, Claude, etc.)
+4. **Get AI response** and continue the conversation normally
 
-## Project Structure
+### Creating Branches
+1. **Right-click any message** (yours or the AI's) in the conversation
+2. **Select "Branch from here"** from the context menu
+3. **Name your branch** (e.g., "Alternative approach", "Deep dive")
+4. **Continue the conversation** in this new direction
+5. **Switch between branches** using the branch selector
 
-```
-ChatBranch/
-├── backend/           # FastAPI backend
-│   ├── app/          # Application code
-│   ├── main.py       # FastAPI entry point
-│   └── .env          # Environment variables
-├── frontend/         # React frontend
-│   ├── src/          # React components
-│   └── package.json  # Dependencies
-├── database/         # Database setup scripts
-└── requirements.txt  # Python dependencies
-```
+### Navigating Your Conversation
+- **Use undo/redo arrows** (◀ ▶) to step through conversation history
+- **Switch to Tree view** to see the visual structure
+- **Click messages in tree view** to jump to specific points
+- **Use branch selector** to switch between conversation paths
 
-## Development
+### Managing Conversations
+- **Conversation sidebar** shows all your saved conversations
+- **Delete branches** you no longer need (except main branch)
+- **Rename conversations** by clicking the edit icon
+- **Automatic saving** preserves all your work
 
-- **Test API:** `python test_api.py`
-- **Backend:** http://localhost:8001 (FastAPI auto-docs at /docs)
-- **Frontend:** http://localhost:3000
-- **Database:** PostgreSQL with tree-structured message storage
+## Use Cases
 
-## Troubleshooting
+### Research and Exploration
+- **Compare different approaches** to solving a problem
+- **Explore multiple angles** of a complex topic
+- **Deep dive into specifics** without losing the main thread
+- **Document your thinking process** with clear visual structure
 
-- **PostgreSQL issues:** Run `sudo service postgresql start` on Linux
-- **Frontend errors:** Run `npm install` in frontend directory
-- **Python errors:** Activate venv with `source venv/bin/activate`
+### Writing and Brainstorming
+- **Draft multiple versions** of content in parallel branches
+- **Explore different writing styles** or tones
+- **Develop ideas incrementally** while preserving alternatives
+- **Collaborate with AI** on creative projects
+
+### Problem Solving
+- **Try different solution strategies** in separate branches
+- **Compare AI model responses** to the same problem
+- **Build on partial solutions** without losing progress
+- **Document decision-making process** with clear paths
+
+### Learning and Teaching
+- **Explore concepts from multiple perspectives**
+- **Create study guides** with branching topics
+- **Compare different explanations** of complex subjects
+- **Build knowledge trees** that grow with your understanding
+
+## Technical Overview
+
+ChatBranch consists of a React frontend for the user interface and a FastAPI backend for data management and AI integration. All conversations are stored in PostgreSQL with a tree structure that preserves the branching relationships between messages.
+
+### Architecture Highlights
+- **Tree-structured storage** preserves conversation branching relationships
+- **Real-time updates** keep the interface synchronized with your actions
+- **Efficient navigation** with intelligent state management
+- **Scalable design** ready for multi-user deployment
+
+### Browser-Like Navigation
+- **URL-based routing** for conversations - each conversation has its own URL
+- **Browser back/forward** works for switching between conversations
+- **Within-conversation navigation** uses the built-in undo/redo system
+- **Bookmarkable conversations** - share specific conversation URLs
+
+## Getting Started
+
+ChatBranch is currently in development mode with full LLM integration coming soon. You can explore all features using the built-in demo mode.
+
+### Demo Mode
+- **No API keys required** - test all features immediately
+- **Realistic dummy responses** simulate actual AI conversations
+- **Full functionality** including branching, navigation, and visualization
+- **Perfect for learning** how branching conversations work
+
+### Coming Soon: Full LLM Integration
+- **Connect your own API keys** for OpenAI, Anthropic, and other providers
+- **Real AI responses** instead of demo content
+- **Advanced model switching** with provider-specific features
+- **Usage tracking** and conversation analytics
+
+## Installation
+
+See [QUICKSTART.md](QUICKSTART.md) for detailed developer setup instructions.
+
+Quick overview:
+1. **Clone the repository** and install dependencies
+2. **Set up PostgreSQL database** using provided scripts
+3. **Run backend and frontend** in separate terminals
+4. **Open browser** to http://localhost:3000
+
+The application runs locally on your machine with full data privacy and control.
+
+## Support and Development
+
+ChatBranch is actively developed with new features being added regularly. The focus is on creating the most intuitive and powerful tool for branching conversations with AI.
+
+### Current Status
+- ✅ **Visual branching** with right-click context menus
+- ✅ **Tree visualization** with interactive diagrams
+- ✅ **Navigation system** with undo/redo functionality
+- ✅ **Multi-model support** framework ready
+- ✅ **Demo mode** for testing without API costs
+- 🔄 **LLM integration** coming soon
+- 🔄 **Multi-user support** planned for future release
+
+### Contributing
+The codebase is designed for extensibility and contribution. Key areas for development include additional AI model integrations, advanced visualization features, and collaborative conversation tools.
