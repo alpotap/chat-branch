@@ -7,6 +7,8 @@ import HeaderControls from './components/HeaderControls';
 import ChatView from './components/ChatView';
 import MessageInput from './components/MessageInput';
 import EmptyState from './components/EmptyState';
+import LoginPage from './components/LoginPage';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { useConversations } from './hooks/useConversations';
 import { useMessages } from './hooks/useMessages';
 import { useBranchMessages } from './hooks/useBranchMessages';
@@ -208,10 +210,20 @@ const ConversationApp: React.FC = () => {
   }, [currentBranch, allBranchMessages, setSelectedMessage, isNavigating, conversationTree]);
 
   const handleCreateConversation = useCallback(async (title?: string) => {
-    const newConv = await createConversation(title);
-    if (newConv) {
-      // Navigate to the new conversation
-      navigate(`/conversation/${newConv.id}`);
+    console.log('🔧 Creating new conversation...');
+    try {
+      const newConv = await createConversation(title);
+      if (newConv) {
+        console.log('✅ Conversation created:', newConv);
+        // Navigate to the new conversation
+        navigate(`/conversation/${newConv.id}`);
+      } else {
+        console.error('❌ Failed to create conversation - no response');
+        alert('Failed to create conversation. Please try again.');
+      }
+    } catch (error) {
+      console.error('❌ Error creating conversation:', error);
+      alert('Failed to create conversation. Please try again.');
     }
   }, [createConversation, navigate]);
 
@@ -376,6 +388,7 @@ const ConversationApp: React.FC = () => {
         onGoBack={undo}
         canGoForward={undoRedoState.canRedo}
         onGoForward={redo}
+        hasMessages={allBranchMessages.length > 0}
       />
 
       <div className="main-container">
@@ -499,15 +512,38 @@ const Home: React.FC = () => {
   );
 };
 
-// Main App component with routing
+// Protected App wrapper that handles authentication
+const ProtectedApp: React.FC = () => {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="App" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+        <div>Loading...</div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <LoginPage />;
+  }
+
+  return (
+    <Routes>
+      <Route path="/" element={<Home />} />
+      <Route path="/conversation/:conversationId" element={<ConversationApp />} />
+    </Routes>
+  );
+};
+
+// Main App component with routing and authentication
 const App: React.FC = () => {
   return (
-    <Router>
-      <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/conversation/:conversationId" element={<ConversationApp />} />
-      </Routes>
-    </Router>
+    <AuthProvider>
+      <Router>
+        <ProtectedApp />
+      </Router>
+    </AuthProvider>
   );
 };
 

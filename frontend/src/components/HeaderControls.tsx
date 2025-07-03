@@ -1,4 +1,5 @@
 import React, { memo, useCallback } from 'react';
+import { useAuth } from '../contexts/AuthContext';
 
 interface HeaderControlsProps {
   currentConversation: any;
@@ -15,6 +16,7 @@ interface HeaderControlsProps {
   onGoBack: () => void;
   canGoForward: boolean;
   onGoForward: () => void;
+  hasMessages?: boolean; // New prop to check if conversation has messages
 }
 
 const HeaderControls = memo(({
@@ -31,8 +33,11 @@ const HeaderControls = memo(({
   canGoBack,
   onGoBack,
   canGoForward,
-  onGoForward
+  onGoForward,
+  hasMessages = false
 }: HeaderControlsProps) => {
+  const { user, logout } = useAuth();
+
   const handleModelChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
     onModelChange(e.target.value);
   }, [onModelChange]);
@@ -40,6 +45,12 @@ const HeaderControls = memo(({
   const handleBranchChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
     onBranchChange(e.target.value);
   }, [onBranchChange]);
+
+  const handleLogout = useCallback(() => {
+    if (window.confirm('Are you sure you want to logout?')) {
+      logout();
+    }
+  }, [logout]);
 
   return (
     <div className="header">
@@ -65,8 +76,8 @@ const HeaderControls = memo(({
         </div>
       </div>
       <div className="controls">
-        {/* Branch selector with delete button */}
-        {currentConversation && (
+        {/* Branch selector with delete button - only show if conversation has messages */}
+        {currentConversation && hasMessages && (
           <div className="branch-controls">
             <select 
               value={currentBranch} 
@@ -128,6 +139,21 @@ const HeaderControls = memo(({
           <option value="claude-3-sonnet-20240229">Claude 3 Sonnet</option>
           <option value="claude-3-haiku-20240307">Claude 3 Haiku</option>
         </select>
+        
+        {/* User info and logout */}
+        <div className="user-controls">
+          <span className="user-info">
+            👤 {user?.name || user?.email}
+            {user?.is_admin && <span className="admin-badge"> (Admin)</span>}
+          </span>
+          <button 
+            onClick={handleLogout}
+            className="logout-btn"
+            title="Logout"
+          >
+            🚪 Logout
+          </button>
+        </div>
       </div>
     </div>
   );

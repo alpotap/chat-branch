@@ -99,14 +99,40 @@
   min-width: 120px;
 }
 
-.branch-selector option, .controls select option {
-  background-color: #333;
-  color: white;
-  padding: 0.5rem;
+/* User Controls Styles */
+.user-controls {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding-left: 1rem;
+  border-left: 1px solid rgba(255,255,255,0.3);
 }
 
-.branch-selector option:hover, .controls select option:hover {
-  background-color: #555;
+.user-info {
+  font-size: 0.9rem;
+  color: rgba(255,255,255,0.9);
+}
+
+.admin-badge {
+  font-size: 0.8rem;
+  color: #ffd700;
+  font-weight: 600;
+}
+
+.logout-btn {
+  padding: 0.4rem 0.8rem;
+  background-color: rgba(255,255,255,0.15);
+  color: white;
+  border: 1px solid rgba(255,255,255,0.3);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 0.9rem;
+}
+
+.logout-btn:hover {
+  background-color: rgba(255,0,0,0.3);
+  border-color: rgba(255,0,0,0.5);
 }
 
 .view-toggle {

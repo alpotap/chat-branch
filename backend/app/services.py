@@ -3,15 +3,17 @@ from typing import List, Dict, Optional
 import uuid
 from datetime import datetime
 
-from .models import Conversation, Message, Branch
-from .schemas import ConversationCreate, MessageCreate, BranchCreate, ConversationTree, MessageNode, ConversationResponse, BranchResponse
+from .models import Conversation, Message, Branch, User
+from .schemas import ConversationCreate, MessageCreate, BranchCreate, ConversationTree, MessageNode, ConversationResponse, BranchResponse, UserResponse, Token
+from .auth import verify_password, get_password_hash, create_access_token
 
 class ConversationService:
     
-    def create_conversation(self, db: Session, conversation: ConversationCreate) -> Conversation:
-        """Create a new conversation"""
+    def create_conversation(self, db: Session, conversation: ConversationCreate, user_id: str) -> Conversation:
+        """Create a new conversation for a specific user"""
         db_conversation = Conversation(
             title=conversation.title,
+            user_id=user_id,
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow()
         )
@@ -20,17 +22,22 @@ class ConversationService:
         db.refresh(db_conversation)
         return db_conversation
     
-    def get_conversation(self, db: Session, conversation_id: str) -> Optional[Conversation]:
-        """Get conversation by ID"""
-        return db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    def get_conversation(self, db: Session, conversation_id: str, user_id: str) -> Optional[Conversation]:
+        """Get conversation by ID for a specific user"""
+        return db.query(Conversation).filter(
+            Conversation.id == conversation_id,
+            Conversation.user_id == user_id
+        ).first()
     
-    def list_conversations(self, db: Session) -> List[Conversation]:
-        """Get all conversations ordered by creation date (newest first)"""
-        return db.query(Conversation).order_by(Conversation.created_at.desc()).all()
+    def list_conversations(self, db: Session, user_id: str) -> List[Conversation]:
+        """Get all conversations for a specific user ordered by creation date (newest first)"""
+        return db.query(Conversation).filter(
+            Conversation.user_id == user_id
+        ).order_by(Conversation.created_at.desc()).all()
     
-    def delete_conversation(self, db: Session, conversation_id: str) -> bool:
+    def delete_conversation(self, db: Session, conversation_id: str, user_id: str) -> bool:
         """Delete a conversation and all its related data"""
-        conversation = self.get_conversation(db, conversation_id)
+        conversation = self.get_conversation(db, conversation_id, user_id)
         if not conversation:
             return False
         
@@ -58,13 +65,13 @@ class ConversationService:
             db.rollback()
             raise e
     
-    def add_message(self, db: Session, conversation_id: str, message: MessageCreate) -> Message:
+    def add_message(self, db: Session, conversation_id: str, message: MessageCreate, user_id: str) -> Message:
         """Add a message to a conversation"""
         
-        # Validate conversation exists
-        conversation = self.get_conversation(db, conversation_id)
+        # Validate conversation exists and belongs to user
+        conversation = self.get_conversation(db, conversation_id, user_id)
         if not conversation:
-            raise ValueError(f"Conversation {conversation_id} not found")
+            raise ValueError(f"Conversation {conversation_id} not found or does not belong to user")
         
         # Validate parent message if specified
         if message.parent_id:
@@ -84,6 +91,7 @@ class ConversationService:
             parent_id=message.parent_id,
             branch_name=message.branch_name or "main",
             llm_model=message.llm_model,
+            user_id=user_id,
             created_at=datetime.utcnow()
         )
         
@@ -94,17 +102,26 @@ class ConversationService:
         db.refresh(db_message)
         return db_message
     
-    def get_message_context(self, db: Session, message_id: str) -> List[Dict]:
+    def get_message_context(self, db: Session, message_id: str, user_id: str) -> List[Dict]:
         """Get the context chain leading to a message (for LLM)"""
         context = []
-        current_message = db.query(Message).filter(Message.id == message_id).first()
+        current_message = db.query(Message).filter(
+            Message.id == message_id,
+            Message.user_id == user_id
+        ).first()
+        
+        if not current_message:
+            return context
         
         # Traverse up the tree to build context
         messages_chain = []
         while current_message:
             messages_chain.append(current_message)
             if current_message.parent_id:
-                current_message = db.query(Message).filter(Message.id == current_message.parent_id).first()
+                current_message = db.query(Message).filter(
+                    Message.id == current_message.parent_id,
+                    Message.user_id == user_id
+                ).first()
             else:
                 break
         
@@ -120,13 +137,19 @@ class ConversationService:
         
         return context
     
-    def create_branch(self, db: Session, conversation_id: str, branch: BranchCreate) -> Branch:
+    def create_branch(self, db: Session, conversation_id: str, branch: BranchCreate, user_id: str) -> Branch:
         """Create a new branch from a message"""
+        # Validate conversation belongs to user
+        conversation = self.get_conversation(db, conversation_id, user_id)
+        if not conversation:
+            raise ValueError(f"Conversation {conversation_id} not found or does not belong to user")
+        
         db_branch = Branch(
             conversation_id=conversation_id,
             name=branch.name,
             created_from_message_id=branch.created_from_message_id,
             color=branch.color,
+            user_id=user_id,
             created_at=datetime.utcnow()
         )
         db.add(db_branch)
@@ -134,18 +157,29 @@ class ConversationService:
         db.refresh(db_branch)
         return db_branch
     
-    def get_branches(self, db: Session, conversation_id: str) -> List[Branch]:
+    def get_branches(self, db: Session, conversation_id: str, user_id: str) -> List[Branch]:
         """Get all branches in a conversation"""
-        return db.query(Branch).filter(Branch.conversation_id == conversation_id).all()
-    
-    def build_conversation_tree(self, db: Session, conversation_id: str) -> ConversationTree:
-        """Build the complete conversation tree structure"""
-        conversation = self.get_conversation(db, conversation_id)
+        # Validate conversation belongs to user
+        conversation = self.get_conversation(db, conversation_id, user_id)
         if not conversation:
-            raise ValueError("Conversation not found")
+            return []
         
-        # Get all messages for this specific conversation
-        messages = db.query(Message).filter(Message.conversation_id == conversation_id).all()
+        return db.query(Branch).filter(
+            Branch.conversation_id == conversation_id,
+            Branch.user_id == user_id
+        ).all()
+    
+    def build_conversation_tree(self, db: Session, conversation_id: str, user_id: str) -> ConversationTree:
+        """Build the complete conversation tree structure"""
+        conversation = self.get_conversation(db, conversation_id, user_id)
+        if not conversation:
+            raise ValueError("Conversation not found or does not belong to user")
+        
+        # Get all messages for this specific conversation and user
+        messages = db.query(Message).filter(
+            Message.conversation_id == conversation_id,
+            Message.user_id == user_id
+        ).all()
         
         # Debug logging
         print(f"🔍 Building tree for conversation {conversation_id}")
@@ -155,7 +189,7 @@ class ConversationService:
         message_nodes = {}
         for msg in messages:
             message_nodes[str(msg.id)] = MessageNode(
-                id=msg.id,
+                id=str(msg.id),  # Convert to string
                 content=msg.content,
                 role=msg.role,
                 branch_name=msg.branch_name,
@@ -178,35 +212,52 @@ class ConversationService:
                     print(f"⚠️  Message {msg.id} has invalid parent_id {msg.parent_id}")
                     orphaned_messages.append(str(msg.id))
                     # Treat as root message for now
-                    root_messages.append(msg.id)
+                    root_messages.append(str(msg.id))
             else:
-                root_messages.append(msg.id)
+                root_messages.append(str(msg.id))
         
         # Debug output
         print(f"🌱 Root messages: {len(root_messages)}")
         print(f"🔗 Orphaned messages: {len(orphaned_messages)}")
         
         # Get branches
-        branches = self.get_branches(db, conversation_id)
-        branch_responses = [BranchResponse.from_orm(branch) for branch in branches]
+        branches = self.get_branches(db, conversation_id, user_id)
+        branch_responses = [
+            BranchResponse(
+                id=str(branch.id),
+                name=branch.name,
+                created_from_message_id=str(branch.created_from_message_id),
+                created_at=branch.created_at,
+                color=branch.color
+            ) 
+            for branch in branches
+        ]
         
         print(f"🌿 Branches: {len(branches)}")
         
         return ConversationTree(
-            conversation=ConversationResponse.from_orm(conversation),
+            conversation=ConversationResponse(
+                id=str(conversation.id),
+                title=conversation.title,
+                created_at=conversation.created_at,
+                updated_at=conversation.updated_at
+            ),
             messages=message_nodes,
             branches=branch_responses,
-            root_messages=root_messages
+            root_messages=[msg_id for msg_id in root_messages]  # Already strings
         )
     
-    def validate_conversation_integrity(self, db: Session, conversation_id: str) -> Dict:
+    def validate_conversation_integrity(self, db: Session, conversation_id: str, user_id: str) -> Dict:
         """Validate conversation integrity and return diagnostic information"""
-        conversation = self.get_conversation(db, conversation_id)
+        conversation = self.get_conversation(db, conversation_id, user_id)
         if not conversation:
-            return {"error": "Conversation not found"}
+            return {"error": "Conversation not found or does not belong to user"}
         
         # Get all messages
-        messages = db.query(Message).filter(Message.conversation_id == conversation_id).all()
+        messages = db.query(Message).filter(
+            Message.conversation_id == conversation_id,
+            Message.user_id == user_id
+        ).all()
         
         diagnostics = {
             "conversation_id": conversation_id,
@@ -260,9 +311,9 @@ class ConversationService:
         
         return diagnostics
 
-    def fix_conversation_integrity(self, db: Session, conversation_id: str) -> Dict:
+    def fix_conversation_integrity(self, db: Session, conversation_id: str, user_id: str) -> Dict:
         """Attempt to fix common conversation integrity issues"""
-        diagnostics = self.validate_conversation_integrity(db, conversation_id)
+        diagnostics = self.validate_conversation_integrity(db, conversation_id, user_id)
         
         fixes_applied = []
         
@@ -447,3 +498,48 @@ class LLMService:
             base_response = base_response[:100] + "..."
         
         return model_prefix + base_response
+
+class AuthService:
+    
+    def authenticate_user(self, db: Session, email: str, password: str) -> Optional[User]:
+        """Authenticate a user with email and password"""
+        print(f"🔐 Attempting to authenticate user: {email}")
+        
+        user = db.query(User).filter(User.email == email).first()
+        if not user:
+            print(f"❌ User {email} not found")
+            return None
+            
+        print(f"✅ User {email} found, checking password...")
+        
+        # Import verify_password here to avoid import issues
+        from .auth import verify_password
+        
+        if not verify_password(password, user.password_hash):
+            print(f"❌ Password verification failed for {email}")
+            return None
+            
+        print(f"✅ Password verified for {email}")
+        return user
+    
+    def get_user_by_id(self, db: Session, user_id: str) -> Optional[User]:
+        """Get user by ID"""
+        try:
+            return db.query(User).filter(User.id == user_id).first()
+        except:
+            return None
+    
+    def get_user_by_email(self, db: Session, email: str) -> Optional[User]:
+        """Get user by email"""
+        return db.query(User).filter(User.email == email).first()
+    
+    def create_access_token_for_user(self, user: User) -> Token:
+        """Create access token for authenticated user"""
+        access_token = create_access_token(
+            data={"sub": str(user.id), "email": user.email, "role": user.role}
+        )
+        return Token(
+            access_token=access_token,
+            token_type="bearer",
+            expires_in=7 * 24 * 60 * 60  # 7 days in seconds
+        )

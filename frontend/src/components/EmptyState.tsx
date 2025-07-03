@@ -16,7 +16,7 @@ const EmptyState = memo(({ onCreateConversation }: EmptyStateProps) => {
         <li>📝 <strong>Switch between branches</strong> to explore different conversation paths</li>
       </ul>
       <button onClick={onCreateConversation} className="cta-button">
-        Start Your First Conversation
+        Start a Conversation
       </button>
     </div>
   );
