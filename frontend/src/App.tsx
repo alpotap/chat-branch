@@ -34,7 +34,14 @@ const ConversationApp: React.FC = () => {
   const navigate = useNavigate();
   const [currentBranch, setCurrentBranch] = useState<string>('main');
   const [selectedModel, setSelectedModel] = useState('gpt-3.5-turbo');
-  const [viewMode, setViewMode] = useState<'chat' | 'tree' | 'debug'>('chat');
+  
+  // Get initial view mode from localStorage or default to 'chat'
+  const getInitialViewMode = (): 'chat' | 'tree' | 'debug' => {
+    const saved = localStorage.getItem('chatbranch-view-mode');
+    return (saved === 'chat' || saved === 'tree' || saved === 'debug') ? saved : 'chat';
+  };
+  
+  const [viewMode, setViewMode] = useState<'chat' | 'tree' | 'debug'>(getInitialViewMode());
   const [messagesPerPage] = useState(20);
   const [debugMode, setDebugMode] = useState(false);
   
@@ -205,9 +212,12 @@ const ConversationApp: React.FC = () => {
   useEffect(() => {
     if (!isNavigating && allBranchMessages.length > 0 && conversationTree) {
       const lastMessage = allBranchMessages[allBranchMessages.length - 1];
-      setSelectedMessage(lastMessage.id);
+      // Only auto-select if no message is currently selected or if the selected message is not in current branch
+      if (!selectedMessage || !allBranchMessages.some(msg => msg.id === selectedMessage)) {
+        setSelectedMessage(lastMessage.id);
+      }
     }
-  }, [currentBranch, allBranchMessages, setSelectedMessage, isNavigating, conversationTree]);
+  }, [currentBranch, allBranchMessages, setSelectedMessage, isNavigating, conversationTree, selectedMessage]);
 
   const handleCreateConversation = useCallback(async (title?: string) => {
     console.log('🔧 Creating new conversation...');
@@ -298,8 +308,21 @@ const ConversationApp: React.FC = () => {
   }, [currentConversation, createBranch, loadConversation, setSelectedMessage]);
 
   const handleMessageSelect = useCallback((messageId: string) => {
+    // In tree view, always switch branch if message is from different branch
+    // In chat view, only select message without switching branch
+    if (viewMode === 'tree' && conversationTree) {
+      const message = conversationTree.messages[messageId];
+      if (message && message.branch_name !== currentBranch) {
+        // Switch to the message's branch in tree view
+        if (!isNavigating) {
+          saveToHistory(message.branch_name, viewMode, messageId);
+        }
+        setCurrentBranch(message.branch_name);
+      }
+    }
+    // Always select the message regardless of view mode
     setSelectedMessage(messageId);
-  }, [setSelectedMessage]);
+  }, [setSelectedMessage, conversationTree, currentBranch, isNavigating, saveToHistory, viewMode, setCurrentBranch]);
 
   const handleBranchSwitch = useCallback((messageId: string) => {
     if (!isNavigating) {
@@ -345,11 +368,25 @@ const ConversationApp: React.FC = () => {
 
   const handleViewModeChange = useCallback((newViewMode: 'chat' | 'tree' | 'debug') => {
     if (newViewMode !== viewMode && !isNavigating) {
-      // Save the NEW state to history (where we're going, not where we were)
-      saveToHistory(currentBranch, newViewMode, selectedMessage || undefined);
+      // If switching from tree to chat view and there's a selected message
+      if (viewMode === 'tree' && newViewMode === 'chat' && selectedMessage && conversationTree) {
+        const selectedMsg = conversationTree.messages[selectedMessage];
+        if (selectedMsg && selectedMsg.branch_name !== currentBranch) {
+          // Switch to the selected message's branch
+          setCurrentBranch(selectedMsg.branch_name);
+          saveToHistory(selectedMsg.branch_name, newViewMode, selectedMessage);
+        } else {
+          saveToHistory(currentBranch, newViewMode, selectedMessage || undefined);
+        }
+      } else {
+        // Save the NEW state to history (where we're going, not where we were)
+        saveToHistory(currentBranch, newViewMode, selectedMessage || undefined);
+      }
     }
     setViewMode(newViewMode);
-  }, [viewMode, currentBranch, selectedMessage, saveToHistory, isNavigating]);
+    // Persist view mode preference to localStorage
+    localStorage.setItem('chatbranch-view-mode', newViewMode);
+  }, [viewMode, currentBranch, selectedMessage, conversationTree, saveToHistory, isNavigating, setCurrentBranch]);
 
   const getAvailableBranches = useCallback((): string[] => {
     if (!conversationTree) return ['main'];

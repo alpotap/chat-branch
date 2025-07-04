@@ -85,7 +85,7 @@ const MessageBubble = memo<MessageBubbleProps>(({
         }}
         onContextMenu={handleRightClick}
         onClick={handleClick}
-        title={message.role === 'assistant' ? 'Right-click to create branch from this AI response' : 'Only AI responses can be branched from'}
+        title={message.role === 'assistant' ? 'Click to select message. Right-click to create branch from this AI response' : 'Click to select message'}
       >
         <div className="message-header">
           <span className="role">{message.role}</span>
@@ -93,7 +93,7 @@ const MessageBubble = memo<MessageBubbleProps>(({
             className="branch-tag" 
             style={{ backgroundColor: getBranchColor(message.branch_name) }}
             onClick={handleBranchTagClick}
-            title="Click to switch to this branch"
+            title="Click to switch to this branch and select this message"
           >
             {message.branch_name}
           </span>

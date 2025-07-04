@@ -99,6 +99,18 @@
   min-width: 120px;
 }
 
+.branch-selector option, .controls select option {
+  background-color: #4b5563;
+  color: white;
+  padding: 0.5rem;
+}
+
+.branch-selector:focus, .controls select:focus {
+  outline: none;
+  border-color: rgba(255,255,255,0.6);
+  background-color: rgba(255,255,255,0.2);
+}
+
 /* User Controls Styles */
 .user-controls {
   display: flex;
@@ -402,8 +414,13 @@
 }
 
 .message-bubble.selected {
-  box-shadow: 0 0 0 2px #667eea;
-  transform: translateY(-1px);
+  box-shadow: 0 0 0 1px rgba(102, 126, 234, 0.3);
+  background-color: rgba(102, 126, 234, 0.05);
+}
+
+.message-bubble.user.selected {
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.4);
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
 }
 
 .message-bubble.user {

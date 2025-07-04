@@ -96,9 +96,6 @@ const ChatView = memo(({
             </div>
           )}
         </div>
-        {selectedMessage && (
-          <span>Selected: {conversationTree?.messages[selectedMessage]?.content.substring(0, 30)}...</span>
-        )}
       </div>
       
       <div className="messages">
