@@ -298,6 +298,25 @@ async def create_branch(
         if not conversation:
             raise HTTPException(status_code=404, detail="Conversation not found")
         
+        # Protect against creating branches with reserved names
+        PROTECTED_BRANCH_NAME = "main"  # TODO: Make this configurable per conversation
+        if branch.name.lower() == PROTECTED_BRANCH_NAME.lower():
+            raise HTTPException(status_code=400, detail=f"Cannot create branch with reserved name '{PROTECTED_BRANCH_NAME}'")
+        
+        # Check if branch name already exists
+        existing_branch = db.query(Branch).filter(
+            Branch.conversation_id == conversation_id,
+            Branch.name == branch.name
+        ).first()
+        
+        existing_messages = db.query(Message).filter(
+            Message.conversation_id == conversation_id,
+            Message.branch_name == branch.name
+        ).first()
+        
+        if existing_branch or existing_messages:
+            raise HTTPException(status_code=400, detail=f"Branch name '{branch.name}' already exists")
+        
         db_branch = conversation_service.create_branch(db, conversation_id, branch, current_user.id)
         return BranchResponse(
             id=str(db_branch.id),
@@ -319,15 +338,23 @@ async def update_branch_color(
 ):
     """Update the color of a branch"""
     try:
+        print(f"🎨 [DEBUG] Updating branch color: conv={conversation_id[:8]}..., branch={branch_name}, color={color_data}")
+        
         # Validate conversation belongs to user
         conversation = conversation_service.get_conversation(db, conversation_id, current_user.id)
         if not conversation:
+            print(f"❌ [DEBUG] Conversation not found: {conversation_id}")
             raise HTTPException(status_code=404, detail="Conversation not found")
+        
+        print(f"✅ [DEBUG] Conversation found: {conversation.title}")
         
         # Get the color from the request data
         color = color_data.get("color")
         if not color:
+            print(f"❌ [DEBUG] No color provided in request data: {color_data}")
             raise HTTPException(status_code=400, detail="Color is required")
+        
+        print(f"🎨 [DEBUG] Color to set: {color}")
         
         # Update the branch color
         branch = db.query(Branch).filter(
@@ -335,15 +362,56 @@ async def update_branch_color(
             Branch.name == branch_name
         ).first()
         
-        if not branch:
-            raise HTTPException(status_code=404, detail="Branch not found")
+        print(f"🔍 [DEBUG] Existing branch record: {branch}")
         
-        branch.color = color
+        if not branch:
+            # Special handling for main branch - create a Branch record if it doesn't exist
+            if branch_name == "main":
+                print(f"🌿 [DEBUG] Creating new main branch record...")
+                # Create a Branch record for main branch
+                from app.models import Message
+                # Find the first message in the conversation to use as created_from_message_id
+                first_message = db.query(Message).filter(
+                    Message.conversation_id == conversation_id,
+                    Message.branch_name == "main"
+                ).order_by(Message.created_at).first()
+                
+                print(f"📝 [DEBUG] First message in main: {first_message.id if first_message else 'None'}")
+                
+                if first_message:
+                    branch = Branch(
+                        conversation_id=conversation_id,
+                        name="main",
+                        created_from_message_id=first_message.id,
+                        color=color,
+                        user_id=current_user.id,
+                        created_at=datetime.utcnow()
+                    )
+                    db.add(branch)
+                    print(f"✅ [DEBUG] Created new main branch record with color {color}")
+                else:
+                    print(f"❌ [DEBUG] No messages found in main branch")
+                    raise HTTPException(status_code=404, detail="No messages found in main branch")
+            else:
+                print(f"❌ [DEBUG] Branch '{branch_name}' not found")
+                raise HTTPException(status_code=404, detail="Branch not found")
+        else:
+            print(f"🔄 [DEBUG] Updating existing branch color from {branch.color} to {color}")
+            branch.color = color
+        
+        print(f"💾 [DEBUG] Committing changes to database...")
         db.commit()
+        print(f"✅ [DEBUG] Database commit successful")
         
         return {"message": "Branch color updated successfully", "color": color}
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+    except Exception as e:
+        print(f"❌ [DEBUG] Unexpected error in update_branch_color: {type(e).__name__}: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 @app.get("/conversations/{conversation_id}/context/{message_id}")
 async def get_message_context(
@@ -608,6 +676,30 @@ async def rename_branch(
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversation not found")
     
+    # Protect main branch from being renamed (configurable in future)
+    PROTECTED_BRANCH_NAME = "main"  # TODO: Make this configurable per conversation
+    if branch_name == PROTECTED_BRANCH_NAME:
+        raise HTTPException(status_code=400, detail=f"Cannot rename the '{PROTECTED_BRANCH_NAME}' branch")
+    
+    # Check if new branch name already exists (check both Branch table and Message table)
+    existing_branch = db.query(Branch).filter(
+        Branch.conversation_id == conversation_id,
+        Branch.name == new_branch_name
+    ).first()
+    
+    existing_messages = db.query(Message).filter(
+        Message.conversation_id == conversation_id,
+        Message.branch_name == new_branch_name
+    ).first()
+    
+    if existing_branch or existing_messages:
+        raise HTTPException(status_code=400, detail=f"Branch name '{new_branch_name}' already exists")
+    
+    # Also protect against renaming TO protected names
+    PROTECTED_BRANCH_NAME = "main"  # TODO: Make this configurable per conversation
+    if new_branch_name.lower() == PROTECTED_BRANCH_NAME.lower() and branch_name.lower() != PROTECTED_BRANCH_NAME.lower():
+        raise HTTPException(status_code=400, detail=f"Cannot rename branch to reserved name '{PROTECTED_BRANCH_NAME}'")
+    
     # Update all messages in the branch
     messages = db.query(Message).filter(
         Message.conversation_id == conversation_id,
@@ -617,6 +709,16 @@ async def rename_branch(
     if not messages:
         raise HTTPException(status_code=404, detail="Branch not found")
     
+    # Update the Branch record if it exists
+    branch_record = db.query(Branch).filter(
+        Branch.conversation_id == conversation_id,
+        Branch.name == branch_name
+    ).first()
+    
+    if branch_record:
+        branch_record.name = new_branch_name
+    
+    # Update all message branch names
     for message in messages:
         message.branch_name = new_branch_name
     

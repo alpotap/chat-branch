@@ -50,9 +50,11 @@ export const useMessages = () => {
         color: color || getRandomBranchColor()
       });
       return true;
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error creating branch:', error);
-      return false;
+      // Throw the error with details so the UI can handle it properly
+      const errorMessage = error.response?.data?.detail || 'Failed to create branch';
+      throw new Error(errorMessage);
     }
   }, []);
 

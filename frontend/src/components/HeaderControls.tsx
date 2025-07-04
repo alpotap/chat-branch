@@ -122,22 +122,43 @@ const HeaderControls: React.FC<HeaderControlsProps> = ({
     setShowBranchManageDialog(true);
   }, [currentBranch]);
 
-  const handleSaveBranchChanges = useCallback(() => {
+  // Helper function to check if a branch is protected (configurable in future)
+  const isProtectedBranch = useCallback((branchName: string) => {
+    const PROTECTED_BRANCHES = ['main']; // TODO: Make this configurable
+    return PROTECTED_BRANCHES.includes(branchName);
+  }, []);
+
+  const handleSaveBranchChanges = useCallback(async () => {
     const newName = manageBranchName.trim();
     if (!newName) return;
 
-    // If name changed, rename the branch
-    if (newName !== currentBranch && onRenameBranch) {
-      onRenameBranch(currentBranch, newName);
-    }
+    try {
+      // Check if we're trying to rename a protected branch
+      const isCurrentProtected = isProtectedBranch(currentBranch);
+      
+      // If name changed and it's not a protected branch, rename it
+      if (newName !== currentBranch && !isCurrentProtected && onRenameBranch) {
+        await onRenameBranch(currentBranch, newName);
+      } else if (newName !== currentBranch && isCurrentProtected) {
+        // Show error for protected branch rename attempt
+        console.warn(`Cannot rename protected branch '${currentBranch}'`);
+        // The error will be handled by the parent component
+        return;
+      }
 
-    // If color changed, recolor the branch
-    if (onRecolorBranch) {
-      onRecolorBranch(newName, manageBranchColor);
-    }
+      // Then update color using the appropriate branch name
+      if (onRecolorBranch) {
+        const branchNameForColor = (!isCurrentProtected && newName !== currentBranch) ? newName : currentBranch;
+        await onRecolorBranch(branchNameForColor, manageBranchColor);
+      }
 
-    setShowBranchManageDialog(false);
-  }, [currentBranch, manageBranchName, manageBranchColor, onRenameBranch, onRecolorBranch]);
+      setShowBranchManageDialog(false);
+    } catch (error: any) {
+      console.error('Error saving branch changes:', error);
+      // Error will be displayed by the parent component's showError
+      // Keep dialog open on error so user can try again or cancel
+    }
+  }, [currentBranch, manageBranchName, manageBranchColor, onRenameBranch, onRecolorBranch, isProtectedBranch]);
 
   const handleCancelBranchManage = useCallback(() => {
     setShowBranchManageDialog(false);
@@ -355,7 +376,17 @@ const HeaderControls: React.FC<HeaderControlsProps> = ({
                 onChange={(e) => setManageBranchName(e.target.value)}
                 placeholder="Enter branch name"
                 autoFocus
+                disabled={isProtectedBranch(currentBranch)}
+                style={{
+                  opacity: isProtectedBranch(currentBranch) ? 0.6 : 1,
+                  cursor: isProtectedBranch(currentBranch) ? 'not-allowed' : 'text'
+                }}
               />
+              {isProtectedBranch(currentBranch) && (
+                <small style={{ color: '#666', fontSize: '0.8em', marginTop: '4px' }}>
+                  The '{currentBranch}' branch cannot be renamed
+                </small>
+              )}
               
               <label>Branch Color:</label>
               <div className="color-options">

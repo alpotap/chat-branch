@@ -184,14 +184,35 @@ const ConversationApp: React.FC = () => {
   // Load conversation when conversationId changes
   useEffect(() => {
     if (conversationId) {
+      console.log(`🔍 [DEBUG] Loading conversation: ${conversationId}`);
+      
+      // For approach 2: Always default to main branch for consistency
+      // TODO: In future, this could be made configurable per conversation
+      const DEFAULT_BRANCH = 'main';
+      const savedViewMode: 'chat' | 'tree' | 'debug' = getInitialViewMode();
+      
+      // Try to restore saved view mode but always use main branch
+      const savedState = localStorage.getItem('chatbranch-state');
+      if (savedState) {
+        try {
+          const state = JSON.parse(savedState);
+          if (state.conversationId === conversationId && state.viewMode) {
+            // Only restore view mode, not branch (always use main)
+            console.log(`🔍 [DEBUG] Restored view mode: ${state.viewMode}`);
+          }
+        } catch (e) {
+          console.warn('Failed to parse saved state:', e);
+        }
+      }
+      
       // Reset all state when switching conversations
-      setCurrentBranch('main');
-      setViewMode('chat');
+      setCurrentBranch(DEFAULT_BRANCH); // Always start with main branch
+      setViewMode(savedViewMode);
       setSelectedMessage(null);
       setNewMessage('');
       setShowAllMessages(false);
       setUndoRedoState({
-        history: [{ branch: 'main', viewMode: 'chat' }],
+        history: [{ branch: DEFAULT_BRANCH, viewMode: savedViewMode }],
         currentIndex: 0,
         canUndo: false,
         canRedo: false
@@ -297,8 +318,8 @@ const ConversationApp: React.FC = () => {
   const handleCreateBranch = useCallback(async (messageId: string, branchName: string, color?: string) => {
     if (!currentConversation) return;
 
-    const success = await createBranch(currentConversation.id, messageId, branchName, color);
-    if (success) {
+    try {
+      await createBranch(currentConversation.id, messageId, branchName, color);
       // Immediately update the UI state
       setCurrentBranch(branchName);
       setSelectedMessage(messageId);
@@ -306,8 +327,11 @@ const ConversationApp: React.FC = () => {
       setViewMode('chat');
       // Then reload the conversation to get the updated data
       await loadConversation(currentConversation.id);
+    } catch (error: any) {
+      console.error('Error creating branch:', error);
+      showError(error.message || 'Failed to create branch. Please try again.');
     }
-  }, [currentConversation, createBranch, loadConversation, setSelectedMessage]);
+  }, [currentConversation, createBranch, loadConversation, setSelectedMessage, showError]);
 
   const handleRegenerate = useCallback(async (messageId: string, type: 'branch' | 'place', branchName?: string) => {
     if (!currentConversation) return;
@@ -461,29 +485,37 @@ const ConversationApp: React.FC = () => {
   const handleRenameBranch = useCallback(async (oldName: string, newName: string) => {
     if (!currentConversation) return;
     
-    const success = await renameBranch(currentConversation.id, oldName, newName);
-    if (success) {
+    try {
+      await renameBranch(currentConversation.id, oldName, newName);
       // Update current branch if we renamed the current one
       if (currentBranch === oldName) {
         setCurrentBranch(newName);
       }
       // Reload conversation to update tree
       await loadConversation(currentConversation.id);
+    } catch (error: any) {
+      console.error('Error renaming branch:', error);
+      showError(error.message || 'Failed to rename branch. Please try again.');
+      throw error; // Re-throw so the dialog knows there was an error
     }
-  }, [currentConversation, renameBranch, currentBranch, loadConversation]);
+  }, [currentConversation, renameBranch, currentBranch, loadConversation, showError]);
 
   const handleRecolorBranch = useCallback(async (branchName: string, color: string) => {
     if (!currentConversation) return;
     
     try {
-      await axios.patch(`http://localhost:8001/conversations/${currentConversation.id}/branches/${branchName}/color`, {
+      console.log(`🎨 [DEBUG] Updating branch color: ${branchName} -> ${color}`);
+      const response = await axios.patch(`http://localhost:8001/conversations/${currentConversation.id}/branches/${branchName}/color`, {
         color: color
       });
+      console.log(`✅ [DEBUG] Branch color update response:`, response.data);
       // Reload conversation to update tree with new color
       await loadConversation(currentConversation.id);
-    } catch (error) {
-      console.error('Error updating branch color:', error);
-      showError('Failed to update branch color. Please try again.');
+    } catch (error: any) {
+      console.error('❌ [DEBUG] Error updating branch color:', error);
+      console.error('❌ [DEBUG] Error response:', error.response?.data);
+      console.error('❌ [DEBUG] Error status:', error.response?.status);
+      showError(`Failed to update branch color. ${error.response?.data?.detail || 'Please try again.'}`);
     }
   }, [currentConversation, loadConversation, showError]);
 
