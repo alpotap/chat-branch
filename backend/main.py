@@ -309,6 +309,42 @@ async def create_branch(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+@app.patch("/conversations/{conversation_id}/branches/{branch_name}/color")
+async def update_branch_color(
+    conversation_id: str,
+    branch_name: str,
+    color_data: dict,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Update the color of a branch"""
+    try:
+        # Validate conversation belongs to user
+        conversation = conversation_service.get_conversation(db, conversation_id, current_user.id)
+        if not conversation:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        
+        # Get the color from the request data
+        color = color_data.get("color")
+        if not color:
+            raise HTTPException(status_code=400, detail="Color is required")
+        
+        # Update the branch color
+        branch = db.query(Branch).filter(
+            Branch.conversation_id == conversation_id,
+            Branch.name == branch_name
+        ).first()
+        
+        if not branch:
+            raise HTTPException(status_code=404, detail="Branch not found")
+        
+        branch.color = color
+        db.commit()
+        
+        return {"message": "Branch color updated successfully", "color": color}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 @app.get("/conversations/{conversation_id}/context/{message_id}")
 async def get_message_context(
     conversation_id: str,

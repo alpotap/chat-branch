@@ -27,6 +27,8 @@ const ConversationSidebar = memo(({
   const [newConversationTitle, setNewConversationTitle] = useState('');
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameTitle, setRenameTitle] = useState('');
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [conversationToDelete, setConversationToDelete] = useState<Conversation | null>(null);
 
   const handleCreateConversation = () => {
     if (newConversationTitle.trim()) {
@@ -54,6 +56,24 @@ const ConversationSidebar = memo(({
   const cancelRename = () => {
     setRenamingId(null);
     setRenameTitle('');
+  };
+
+  const handleDeleteClick = (conv: Conversation) => {
+    setConversationToDelete(conv);
+    setShowDeleteModal(true);
+  };
+
+  const confirmDelete = () => {
+    if (conversationToDelete) {
+      onDeleteConversation(conversationToDelete.id);
+    }
+    setShowDeleteModal(false);
+    setConversationToDelete(null);
+  };
+
+  const cancelDelete = () => {
+    setShowDeleteModal(false);
+    setConversationToDelete(null);
   };
 
   return (
@@ -138,9 +158,7 @@ const ConversationSidebar = memo(({
                   <button 
                     onClick={(e) => {
                       e.stopPropagation();
-                      if (window.confirm(`Are you sure you want to delete "${conv.title}"? This cannot be undone.`)) {
-                        onDeleteConversation(conv.id);
-                      }
+                      handleDeleteClick(conv);
                     }}
                     className="delete-btn"
                     title="Delete conversation"
@@ -184,6 +202,46 @@ const ConversationSidebar = memo(({
                 Create
               </button>
               <button onClick={() => setShowCreateDialog(false)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Conversation Confirmation Dialog */}
+      {showDeleteModal && conversationToDelete && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <h3>Delete Conversation</h3>
+            <p>Are you sure you want to delete "<strong>{conversationToDelete.title}</strong>"?</p>
+            <p style={{ color: '#dc3545', fontWeight: 'bold' }}>This action cannot be undone.</p>
+            <div className="modal-buttons">
+              <button 
+                onClick={confirmDelete}
+                style={{
+                  backgroundColor: '#dc3545',
+                  color: 'white',
+                  border: 'none',
+                  padding: '8px 16px',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  marginRight: '8px'
+                }}
+              >
+                Delete
+              </button>
+              <button 
+                onClick={cancelDelete}
+                style={{
+                  backgroundColor: '#6c757d',
+                  color: 'white',
+                  border: 'none',
+                  padding: '8px 16px',
+                  borderRadius: '4px',
+                  cursor: 'pointer'
+                }}
+              >
                 Cancel
               </button>
             </div>

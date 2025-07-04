@@ -8,6 +8,8 @@ interface HeaderControlsProps {
   availableBranches: string[];
   onBranchChange: (branch: string) => void;
   onDeleteBranch: (branchName: string) => void;
+  onRenameBranch?: (oldName: string, newName: string) => void;
+  onRecolorBranch?: (branchName: string, color: string) => void;
   viewMode: 'chat' | 'tree' | 'debug';
   onViewModeChange: (mode: 'chat' | 'tree' | 'debug') => void;
   selectedModel: string;
@@ -26,6 +28,8 @@ const HeaderControls: React.FC<HeaderControlsProps> = ({
   availableBranches,
   onBranchChange,
   onDeleteBranch,
+  onRenameBranch,
+  onRecolorBranch,
   viewMode,
   onViewModeChange,
   selectedModel,
@@ -41,6 +45,10 @@ const HeaderControls: React.FC<HeaderControlsProps> = ({
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [dependentBranches, setDependentBranches] = useState<string[]>([]);
   const [deletingBranch, setDeletingBranch] = useState<string>('');
+  const [showLogoutDialog, setShowLogoutDialog] = useState(false);
+  const [showBranchManageDialog, setShowBranchManageDialog] = useState(false);
+  const [manageBranchName, setManageBranchName] = useState('');
+  const [manageBranchColor, setManageBranchColor] = useState('#667eea');
 
   const handleModelChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
     onModelChange(e.target.value);
@@ -51,10 +59,17 @@ const HeaderControls: React.FC<HeaderControlsProps> = ({
   }, [onBranchChange]);
 
   const handleLogout = useCallback(() => {
-    if (window.confirm('Are you sure you want to logout?')) {
-      logout();
-    }
+    setShowLogoutDialog(true);
+  }, []);
+
+  const handleConfirmLogout = useCallback(() => {
+    logout();
+    setShowLogoutDialog(false);
   }, [logout]);
+
+  const handleCancelLogout = useCallback(() => {
+    setShowLogoutDialog(false);
+  }, []);
 
   const handleDeleteBranchClick = useCallback(async () => {
     if (!currentConversation || currentBranch === 'main') return;
@@ -73,17 +88,17 @@ const HeaderControls: React.FC<HeaderControlsProps> = ({
         setDeletingBranch(currentBranch);
         setShowDeleteDialog(true);
       } else {
-        // No dependents, use simple confirmation
-        if (window.confirm(`Are you sure you want to delete branch "${currentBranch}"? This cannot be undone.`)) {
-          onDeleteBranch(currentBranch);
-        }
+        // No dependents, show simple deletion dialog
+        setDependentBranches([]);
+        setDeletingBranch(currentBranch);
+        setShowDeleteDialog(true);
       }
     } catch (error) {
       console.error('Error checking dependent branches:', error);
-      // Fall back to simple confirmation if API call fails
-      if (window.confirm(`Are you sure you want to delete branch "${currentBranch}"? This cannot be undone.`)) {
-        onDeleteBranch(currentBranch);
-      }
+      // Fall back to simple deletion dialog if API call fails
+      setDependentBranches([]);
+      setDeletingBranch(currentBranch);
+      setShowDeleteDialog(true);
     }
   }, [currentConversation, currentBranch, onDeleteBranch]);
 
@@ -98,6 +113,34 @@ const HeaderControls: React.FC<HeaderControlsProps> = ({
     setShowDeleteDialog(false);
     setDependentBranches([]);
     setDeletingBranch('');
+  }, []);
+
+  const handleManageBranch = useCallback(() => {
+    setManageBranchName(currentBranch);
+    // Try to get current branch color from conversation tree or use default
+    setManageBranchColor('#667eea');
+    setShowBranchManageDialog(true);
+  }, [currentBranch]);
+
+  const handleSaveBranchChanges = useCallback(() => {
+    const newName = manageBranchName.trim();
+    if (!newName) return;
+
+    // If name changed, rename the branch
+    if (newName !== currentBranch && onRenameBranch) {
+      onRenameBranch(currentBranch, newName);
+    }
+
+    // If color changed, recolor the branch
+    if (onRecolorBranch) {
+      onRecolorBranch(newName, manageBranchColor);
+    }
+
+    setShowBranchManageDialog(false);
+  }, [currentBranch, manageBranchName, manageBranchColor, onRenameBranch, onRecolorBranch]);
+
+  const handleCancelBranchManage = useCallback(() => {
+    setShowBranchManageDialog(false);
   }, []);
 
   return (
@@ -136,6 +179,13 @@ const HeaderControls: React.FC<HeaderControlsProps> = ({
                 <option key={branch} value={branch}>📝 {branch}</option>
               ))}
             </select>
+            <button
+              onClick={handleManageBranch}
+              className="manage-branch-btn"
+              title="Rename & recolor branch"
+            >
+              ✏️
+            </button>
             {currentBranch !== 'main' && (
               <button
                 onClick={handleDeleteBranchClick}
@@ -214,26 +264,141 @@ const HeaderControls: React.FC<HeaderControlsProps> = ({
         <div className="modal-overlay">
           <div className="modal">
             <h3>⚠️ Confirm Branch Deletion</h3>
-            <p>
-              Deleting branch "<strong>{deletingBranch}</strong>" will also delete the following dependent branches:
-            </p>
-            <div className="dependent-branches-list">
-              <ul>
-                {dependentBranches.map(branch => (
-                  <li key={branch}>{branch}</li>
-                ))}
-              </ul>
-            </div>
-            <p><strong>This action cannot be undone!</strong></p>
+            {dependentBranches.length > 0 ? (
+              <>
+                <p>
+                  Deleting branch "<strong>{deletingBranch}</strong>" will also delete the following dependent branches:
+                </p>
+                <div className="dependent-branches-list">
+                  <ul>
+                    {dependentBranches.map(branch => (
+                      <li key={branch}>{branch}</li>
+                    ))}
+                  </ul>
+                </div>
+                <p><strong>This action cannot be undone!</strong></p>
+                <div className="modal-buttons">
+                  <button 
+                    onClick={handleConfirmDelete}
+                    className="confirm-btn"
+                  >
+                    Delete All ({dependentBranches.length + 1} branches)
+                  </button>
+                  <button 
+                    onClick={handleCancelDelete}
+                    className="cancel-btn"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p>
+                  Are you sure you want to delete branch "<strong>{deletingBranch}</strong>"?
+                </p>
+                <p><strong>This action cannot be undone!</strong></p>
+                <div className="modal-buttons">
+                  <button 
+                    onClick={handleConfirmDelete}
+                    className="confirm-btn"
+                  >
+                    Delete Branch
+                  </button>
+                  <button 
+                    onClick={handleCancelDelete}
+                    className="cancel-btn"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Logout Confirmation Dialog */}
+      {showLogoutDialog && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <h3>🚪 Confirm Logout</h3>
+            <p>Are you sure you want to logout?</p>
             <div className="modal-buttons">
               <button 
-                onClick={handleConfirmDelete}
+                onClick={handleConfirmLogout}
                 className="confirm-btn"
               >
-                Delete All ({dependentBranches.length + 1} branches)
+                Logout
               </button>
               <button 
-                onClick={handleCancelDelete}
+                onClick={handleCancelLogout}
+                className="cancel-btn"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Branch Management Dialog */}
+      {showBranchManageDialog && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <h3>✏️ Manage Branch</h3>
+            <div className="color-selection">
+              <label>Branch Name:</label>
+              <input
+                type="text"
+                value={manageBranchName}
+                onChange={(e) => setManageBranchName(e.target.value)}
+                placeholder="Enter branch name"
+                autoFocus
+              />
+              
+              <label>Branch Color:</label>
+              <div className="color-options">
+                <input
+                  type="color"
+                  value={manageBranchColor}
+                  onChange={(e) => setManageBranchColor(e.target.value)}
+                  className="color-picker"
+                  style={{
+                    width: '40px',
+                    height: '40px',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                  }}
+                />
+                <div className="color-presets">
+                  {[
+                    '#667eea', '#764ba2', '#f093fb', '#f5576c',
+                    '#4facfe', '#00f2fe', '#43e97b', '#38f9d7',
+                    '#ffa726', '#ff7043', '#ab47bc', '#7e57c2'
+                  ].map(color => (
+                    <div
+                      key={color}
+                      className={`color-preset ${manageBranchColor === color ? 'selected' : ''}`}
+                      style={{ backgroundColor: color }}
+                      onClick={() => setManageBranchColor(color)}
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="modal-buttons">
+              <button 
+                onClick={handleSaveBranchChanges}
+                className="confirm-btn"
+                disabled={!manageBranchName.trim()}
+              >
+                Save Changes
+              </button>
+              <button 
+                onClick={handleCancelBranchManage}
                 className="cancel-btn"
               >
                 Cancel

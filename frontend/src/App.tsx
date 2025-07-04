@@ -54,6 +54,10 @@ const ConversationApp: React.FC = () => {
     canRedo: false
   });
   const [isNavigating, setIsNavigating] = useState(false);
+  
+  // Error modal state
+  const [showErrorModal, setShowErrorModal] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
 
   const {
     conversations,
@@ -220,6 +224,12 @@ const ConversationApp: React.FC = () => {
     }
   }, [currentBranch, allBranchMessages, setSelectedMessage, isNavigating, conversationTree, selectedMessage]);
 
+  // Helper function to show error modal instead of alert
+  const showError = useCallback((message: string) => {
+    setErrorMessage(message);
+    setShowErrorModal(true);
+  }, []);
+
   const handleCreateConversation = useCallback(async (title?: string) => {
     console.log('🔧 Creating new conversation...');
     try {
@@ -230,26 +240,17 @@ const ConversationApp: React.FC = () => {
         navigate(`/conversation/${newConv.id}`);
       } else {
         console.error('❌ Failed to create conversation - no response');
-        alert('Failed to create conversation. Please try again.');
+        showError('Failed to create conversation. Please try again.');
       }
     } catch (error) {
       console.error('❌ Error creating conversation:', error);
-      alert('Failed to create conversation. Please try again.');
+      showError('Failed to create conversation. Please try again.');
     }
-  }, [createConversation, navigate]);
+  }, [createConversation, navigate, showError]);
 
   const handleRenameConversation = useCallback(async (conversationId: string, newTitle: string) => {
     await renameConversation(conversationId, newTitle);
   }, [renameConversation]);
-
-  const handleRenameBranch = useCallback(async (oldBranchName: string, newBranchName: string) => {
-    if (!currentConversation) return;
-    
-    const success = await renameBranch(currentConversation.id, oldBranchName, newBranchName);
-    if (success) {
-      setCurrentBranch(newBranchName);
-    }
-  }, [currentConversation, renameBranch]);
 
   const handleLoadConversation = useCallback(async (conversationId: string) => {
     // Navigate to the conversation URL instead of loading inline
@@ -273,9 +274,9 @@ const ConversationApp: React.FC = () => {
       }
       console.log('✅ Conversation deleted successfully');
     } else {
-      alert('Failed to delete conversation. Please try again.');
+      showError('Failed to delete conversation. Please try again.');
     }
-  }, [currentConversation, conversations, deleteConversation, setSelectedMessage, setShowAllMessages]);
+  }, [currentConversation, conversations, deleteConversation, setSelectedMessage, setShowAllMessages, showError]);
 
   const handleSendMessage = useCallback(async () => {
     if (!currentConversation) return;
@@ -298,13 +299,13 @@ const ConversationApp: React.FC = () => {
 
     const success = await createBranch(currentConversation.id, messageId, branchName, color);
     if (success) {
-      // First, reload the conversation to get the updated data
-      await loadConversation(currentConversation.id);
-      // Then update the UI state
+      // Immediately update the UI state
       setCurrentBranch(branchName);
       setSelectedMessage(messageId);
       // Switch to chat view after creating branch for immediate use
       setViewMode('chat');
+      // Then reload the conversation to get the updated data
+      await loadConversation(currentConversation.id);
     }
   }, [currentConversation, createBranch, loadConversation, setSelectedMessage]);
 
@@ -342,12 +343,12 @@ const ConversationApp: React.FC = () => {
     } catch (error) {
       console.error('Regeneration error:', error);
       if (axios.isAxiosError(error) && error.response) {
-        alert(`Failed to regenerate: ${error.response.data.detail || error.message}`);
+        showError(`Failed to regenerate: ${error.response.data.detail || error.message}`);
       } else {
-        alert('An error occurred during regeneration. Please try again.');
+        showError('An error occurred during regeneration. Please try again.');
       }
     }
-  }, [currentConversation, loadConversation]);
+  }, [currentConversation, loadConversation, showError]);
 
   const handleMessageSelect = useCallback((messageId: string) => {
     // In tree view, always switch branch if message is from different branch
@@ -438,8 +439,13 @@ const ConversationApp: React.FC = () => {
       branches.add(message.branch_name);
     });
     
+    // Always include the current branch (important for newly created branches)
+    if (currentBranch) {
+      branches.add(currentBranch);
+    }
+    
     return Array.from(branches).sort();
-  }, [conversationTree]);
+  }, [conversationTree, currentBranch]);
 
   const handleDeleteBranch = useCallback(async (branchName: string) => {
     if (!currentConversation) return;
@@ -452,6 +458,35 @@ const ConversationApp: React.FC = () => {
     }
   }, [currentConversation, deleteBranch, setSelectedMessage]);
 
+  const handleRenameBranch = useCallback(async (oldName: string, newName: string) => {
+    if (!currentConversation) return;
+    
+    const success = await renameBranch(currentConversation.id, oldName, newName);
+    if (success) {
+      // Update current branch if we renamed the current one
+      if (currentBranch === oldName) {
+        setCurrentBranch(newName);
+      }
+      // Reload conversation to update tree
+      await loadConversation(currentConversation.id);
+    }
+  }, [currentConversation, renameBranch, currentBranch, loadConversation]);
+
+  const handleRecolorBranch = useCallback(async (branchName: string, color: string) => {
+    if (!currentConversation) return;
+    
+    try {
+      await axios.patch(`http://localhost:8001/conversations/${currentConversation.id}/branches/${branchName}/color`, {
+        color: color
+      });
+      // Reload conversation to update tree with new color
+      await loadConversation(currentConversation.id);
+    } catch (error) {
+      console.error('Error updating branch color:', error);
+      showError('Failed to update branch color. Please try again.');
+    }
+  }, [currentConversation, loadConversation, showError]);
+
   return (
     <div className="App">
       <HeaderControls
@@ -460,6 +495,8 @@ const ConversationApp: React.FC = () => {
         availableBranches={getAvailableBranches()}
         onBranchChange={handleBranchChange}
         onDeleteBranch={handleDeleteBranch}
+        onRenameBranch={handleRenameBranch}
+        onRecolorBranch={handleRecolorBranch}
         viewMode={viewMode}
         onViewModeChange={handleViewModeChange}
         selectedModel={selectedModel}
@@ -532,6 +569,31 @@ const ConversationApp: React.FC = () => {
           )}
         </div>
       </div>
+      
+      {/* Error Modal */}
+      {showErrorModal && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <h3>Error</h3>
+            <p>{errorMessage}</p>
+            <div className="modal-buttons">
+              <button 
+                onClick={() => setShowErrorModal(false)}
+                style={{
+                  backgroundColor: '#667eea',
+                  color: 'white',
+                  border: 'none',
+                  padding: '8px 16px',
+                  borderRadius: '4px',
+                  cursor: 'pointer'
+                }}
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -540,6 +602,16 @@ const ConversationApp: React.FC = () => {
 const Home: React.FC = () => {
   const navigate = useNavigate();
   const { conversations, loadConversations, createConversation, deleteConversation, renameConversation } = useConversations();
+  
+  // Error modal state
+  const [showErrorModal, setShowErrorModal] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  
+  // Helper function to show error modal instead of alert
+  const showError = useCallback((message: string) => {
+    setErrorMessage(message);
+    setShowErrorModal(true);
+  }, []);
   
   useEffect(() => {
     loadConversations();
@@ -559,13 +631,13 @@ const Home: React.FC = () => {
         navigate(`/conversation/${newConv.id}`);
       } else {
         console.error('❌ Failed to create conversation - no response');
-        alert('Failed to create conversation. Please try again.');
+        showError('Failed to create conversation. Please try again.');
       }
     } catch (error) {
       console.error('❌ Error creating conversation:', error);
-      alert('Failed to create conversation. Please try again.');
+      showError('Failed to create conversation. Please try again.');
     }
-  }, [createConversation, navigate]);
+  }, [createConversation, navigate, showError]);
 
   const handleRenameConversation = useCallback(async (conversationId: string, newTitle: string) => {
     await renameConversation(conversationId, newTitle);
@@ -577,10 +649,10 @@ const Home: React.FC = () => {
       if (success) {
         console.log('✅ Conversation deleted successfully');
       } else {
-        alert('Failed to delete conversation. Please try again.');
+        showError('Failed to delete conversation. Please try again.');
       }
     }
-  }, [deleteConversation]);
+  }, [deleteConversation, showError]);
 
   return (
     <div className="App">
@@ -590,6 +662,8 @@ const Home: React.FC = () => {
         availableBranches={[]}
         onBranchChange={() => {}}
         onDeleteBranch={() => {}}
+        onRenameBranch={() => {}}
+        onRecolorBranch={() => {}}
         viewMode="chat"
         onViewModeChange={() => {}}
         selectedModel="gpt-3.5-turbo"
@@ -614,6 +688,31 @@ const Home: React.FC = () => {
           <EmptyState onCreateConversation={handleCreateConversation} />
         </div>
       </div>
+      
+      {/* Error Modal */}
+      {showErrorModal && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <h3>Error</h3>
+            <p>{errorMessage}</p>
+            <div className="modal-buttons">
+              <button 
+                onClick={() => setShowErrorModal(false)}
+                style={{
+                  backgroundColor: '#667eea',
+                  color: 'white',
+                  border: 'none',
+                  padding: '8px 16px',
+                  borderRadius: '4px',
+                  cursor: 'pointer'
+                }}
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
