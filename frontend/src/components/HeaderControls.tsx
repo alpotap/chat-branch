@@ -1,4 +1,5 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useState } from 'react';
+import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
 
 interface HeaderControlsProps {
@@ -37,6 +38,9 @@ const HeaderControls: React.FC<HeaderControlsProps> = ({
   hasMessages = false
 }) => {
   const { user, logout, loading } = useAuth();
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [dependentBranches, setDependentBranches] = useState<string[]>([]);
+  const [deletingBranch, setDeletingBranch] = useState<string>('');
 
   const handleModelChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
     onModelChange(e.target.value);
@@ -51,6 +55,50 @@ const HeaderControls: React.FC<HeaderControlsProps> = ({
       logout();
     }
   }, [logout]);
+
+  const handleDeleteBranchClick = useCallback(async () => {
+    if (!currentConversation || currentBranch === 'main') return;
+    
+    try {
+      // Check for dependent branches
+      const response = await axios.get(
+        `http://localhost:8001/conversations/${currentConversation.id}/branches/${currentBranch}/dependents`
+      );
+      
+      const dependents = response.data.dependent_branches || [];
+      
+      if (dependents.length > 0) {
+        // Show confirmation dialog with dependent branches
+        setDependentBranches(dependents);
+        setDeletingBranch(currentBranch);
+        setShowDeleteDialog(true);
+      } else {
+        // No dependents, use simple confirmation
+        if (window.confirm(`Are you sure you want to delete branch "${currentBranch}"? This cannot be undone.`)) {
+          onDeleteBranch(currentBranch);
+        }
+      }
+    } catch (error) {
+      console.error('Error checking dependent branches:', error);
+      // Fall back to simple confirmation if API call fails
+      if (window.confirm(`Are you sure you want to delete branch "${currentBranch}"? This cannot be undone.`)) {
+        onDeleteBranch(currentBranch);
+      }
+    }
+  }, [currentConversation, currentBranch, onDeleteBranch]);
+
+  const handleConfirmDelete = useCallback(() => {
+    onDeleteBranch(deletingBranch);
+    setShowDeleteDialog(false);
+    setDependentBranches([]);
+    setDeletingBranch('');
+  }, [deletingBranch, onDeleteBranch]);
+
+  const handleCancelDelete = useCallback(() => {
+    setShowDeleteDialog(false);
+    setDependentBranches([]);
+    setDeletingBranch('');
+  }, []);
 
   return (
     <div className="header">
@@ -90,11 +138,7 @@ const HeaderControls: React.FC<HeaderControlsProps> = ({
             </select>
             {currentBranch !== 'main' && (
               <button
-                onClick={() => {
-                  if (window.confirm(`Are you sure you want to delete branch "${currentBranch}"? This cannot be undone.`)) {
-                    onDeleteBranch(currentBranch);
-                  }
-                }}
+                onClick={handleDeleteBranchClick}
                 className="delete-branch-btn"
                 title="Delete current branch"
               >
@@ -164,6 +208,40 @@ const HeaderControls: React.FC<HeaderControlsProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Delete Branch Confirmation Dialog */}
+      {showDeleteDialog && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <h3>⚠️ Confirm Branch Deletion</h3>
+            <p>
+              Deleting branch "<strong>{deletingBranch}</strong>" will also delete the following dependent branches:
+            </p>
+            <div className="dependent-branches-list">
+              <ul>
+                {dependentBranches.map(branch => (
+                  <li key={branch}>{branch}</li>
+                ))}
+              </ul>
+            </div>
+            <p><strong>This action cannot be undone!</strong></p>
+            <div className="modal-buttons">
+              <button 
+                onClick={handleConfirmDelete}
+                className="confirm-btn"
+              >
+                Delete All ({dependentBranches.length + 1} branches)
+              </button>
+              <button 
+                onClick={handleCancelDelete}
+                className="cancel-btn"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

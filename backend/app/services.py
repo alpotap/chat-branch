@@ -199,12 +199,45 @@ class ConversationService:
         
         return thread
     
+    def check_branch_name_exists(self, db: Session, conversation_id: str, branch_name: str, user_id: str) -> bool:
+        """Check if a branch name already exists in the conversation"""
+        existing_branch = db.query(Branch).filter(
+            Branch.conversation_id == conversation_id,
+            Branch.name == branch_name,
+            Branch.user_id == user_id
+        ).first()
+        
+        # Also check if it's a branch_name used in messages (like "main")
+        existing_message = db.query(Message).filter(
+            Message.conversation_id == conversation_id,
+            Message.branch_name == branch_name,
+            Message.user_id == user_id
+        ).first()
+        
+        return existing_branch is not None or existing_message is not None
+    
+    def generate_unique_branch_name(self, db: Session, conversation_id: str, base_name: str, user_id: str) -> str:
+        """Generate a unique branch name by appending numbers if needed"""
+        if not self.check_branch_name_exists(db, conversation_id, base_name, user_id):
+            return base_name
+        
+        counter = 2
+        while True:
+            candidate_name = f"{base_name}-{counter}"
+            if not self.check_branch_name_exists(db, conversation_id, candidate_name, user_id):
+                return candidate_name
+            counter += 1
+    
     def create_branch(self, db: Session, conversation_id: str, branch: BranchCreate, user_id: str) -> Branch:
         """Create a new branch from a message"""
         # Validate conversation belongs to user
         conversation = self.get_conversation(db, conversation_id, user_id)
         if not conversation:
             raise ValueError(f"Conversation {conversation_id} not found or does not belong to user")
+        
+        # Check if branch name already exists
+        if self.check_branch_name_exists(db, conversation_id, branch.name, user_id):
+            raise ValueError(f"Branch name '{branch.name}' already exists in this conversation. Please choose a different name.")
         
         db_branch = Branch(
             conversation_id=conversation_id,
@@ -230,6 +263,263 @@ class ConversationService:
             Branch.conversation_id == conversation_id,
             Branch.user_id == user_id
         ).all()
+    
+    def get_dependent_branches(self, db: Session, conversation_id: str, branch_name: str, user_id: str) -> List[str]:
+        """
+        Get all branches that depend on the given branch, including nested dependencies.
+        """
+        # Validate user has access to the conversation
+        conversation = self.get_conversation(db, conversation_id, user_id)
+        if not conversation:
+            raise ValueError("Conversation not found or access denied.")
+
+        all_dependent_branches = set()
+        branches_to_check = [branch_name]
+        
+        checked_branches = set()
+
+        while branches_to_check:
+            current_branch = branches_to_check.pop(0)
+            if current_branch in checked_branches:
+                continue
+            
+            checked_branches.add(current_branch)
+
+            # Get all message IDs from the current branch being checked
+            message_ids_in_branch = [
+                str(msg.id) for msg in db.query(Message.id).filter(
+                    Message.conversation_id == conversation_id,
+                    Message.branch_name == current_branch,
+                    Message.user_id == user_id
+                ).all()
+            ]
+
+            if not message_ids_in_branch:
+                continue
+
+            # Find branches created from messages in the current branch
+            direct_dependents = db.query(Branch).filter(
+                Branch.conversation_id == conversation_id,
+                Branch.user_id == user_id,
+                Branch.created_from_message_id.in_(message_ids_in_branch)
+            ).all()
+
+            for dependent_branch in direct_dependents:
+                if dependent_branch.name not in all_dependent_branches:
+                    all_dependent_branches.add(dependent_branch.name)
+                    branches_to_check.append(dependent_branch.name)
+        
+        return list(all_dependent_branches)
+
+    def delete_branch_with_cascading(self, db: Session, conversation_id: str, branch_name: str, user_id: str) -> List[str]:
+        """
+        Delete a branch and all its dependent branches, returning the names of all deleted branches.
+        """
+        if branch_name == "main":
+            raise ValueError("The 'main' branch cannot be deleted.")
+
+        # Get all dependent branches
+        dependent_branches = self.get_dependent_branches(db, conversation_id, branch_name, user_id)
+        
+        branches_to_delete = [branch_name] + dependent_branches
+        
+        deleted_branch_names = []
+
+        # Delete branches in reverse dependency order (dependents first, then parents)
+        branches_to_delete.reverse()
+
+        for b_name in branches_to_delete:
+            # 1. Get all messages in this branch
+            messages_in_branch = db.query(Message).filter(
+                Message.conversation_id == conversation_id,
+                Message.branch_name == b_name,
+                Message.user_id == user_id
+            ).all()
+            
+            # 2. For each message in this branch, remove any parent_id references from other messages
+            for message in messages_in_branch:
+                # Update any messages that reference this message as parent (set parent_id to None)
+                db.query(Message).filter(
+                    Message.parent_id == message.id
+                ).update({"parent_id": None}, synchronize_session=False)
+            
+            # 3. Now delete all messages in this branch
+            db.query(Message).filter(
+                Message.conversation_id == conversation_id,
+                Message.branch_name == b_name,
+                Message.user_id == user_id
+            ).delete(synchronize_session=False)
+            
+            # 4. Delete the branch record itself
+            db.query(Branch).filter(
+                Branch.conversation_id == conversation_id,
+                Branch.name == b_name,
+                Branch.user_id == user_id
+            ).delete(synchronize_session=False)
+            
+            deleted_branch_names.append(b_name)
+
+        db.commit()
+        # Return in original order (parent branch first)
+        deleted_branch_names.reverse()
+        return deleted_branch_names
+
+    def delete_branch(self, db: Session, conversation_id: str, branch_name: str, user_id: str) -> bool:
+        """Delete a single branch and its messages."""
+        if branch_name == "main":
+            return False
+
+        # Delete messages in the branch
+        db.query(Message).filter(
+            Message.conversation_id == conversation_id,
+            Message.branch_name == branch_name,
+            Message.user_id == user_id
+        ).delete()
+
+        # Delete the branch itself
+        branch = db.query(Branch).filter(
+            Branch.conversation_id == conversation_id,
+            Branch.name == branch_name,
+            Branch.user_id == user_id
+        ).first()
+
+        if branch:
+            db.delete(branch)
+            db.commit()
+            return True
+        
+        # If no branch record (e.g., an empty branch that was never saved), still commit message deletion
+        db.commit()
+        return False
+    
+    def regenerate_message_in_branch(self, db: Session, conversation_id: str, message_id: str, branch_name: str, user_id: str) -> tuple[Branch, Message]:
+        """Regenerate an AI message by creating a new branch from the previous user message"""
+        # Get the AI message to regenerate
+        ai_message = db.query(Message).filter(
+            Message.id == message_id,
+            Message.conversation_id == conversation_id,
+            Message.user_id == user_id,
+            Message.role == "assistant"
+        ).first()
+        
+        if not ai_message:
+            raise ValueError("AI message not found or does not belong to user")
+        
+        # Check if this message has any children (follow-up messages)
+        children = db.query(Message).filter(
+            Message.parent_id == message_id,
+            Message.conversation_id == conversation_id,
+            Message.user_id == user_id
+        ).all()
+        
+        if children:
+            raise ValueError("Cannot regenerate message that has follow-up responses. Only the most recent message in a branch can be regenerated.")
+        
+        # Check if any branches were created from this message
+        branches_from_message = db.query(Branch).filter(
+            Branch.created_from_message_id == message_id,
+            Branch.conversation_id == conversation_id,
+            Branch.user_id == user_id
+        ).all()
+        
+        if branches_from_message:
+            raise ValueError("Cannot regenerate message that has branches created from it. Only the most recent message in a branch can be regenerated.")
+        
+        # Get the user message that prompted this AI response
+        user_message = db.query(Message).filter(
+            Message.id == ai_message.parent_id,
+            Message.conversation_id == conversation_id,
+            Message.user_id == user_id,
+            Message.role == "user"
+        ).first()
+        
+        if not user_message:
+            raise ValueError("Parent user message not found")
+        
+        # Generate unique branch name
+        final_branch_name = self.generate_unique_branch_name(db, conversation_id, branch_name, user_id)
+        
+        # Determine the message to branch from
+        # For regeneration, we want to branch from the user message that prompted the AI response
+        branch_from_message_id = str(user_message.id)
+        
+        # Create new branch from the user message
+        branch_data = BranchCreate(
+            name=final_branch_name,
+            created_from_message_id=branch_from_message_id,
+            color="#4CAF50"  # Default green color for regeneration branches
+        )
+        
+        new_branch = self.create_branch_without_validation(db, conversation_id, branch_data, user_id)
+        
+        # Copy the user message to the new branch
+        new_user_message = Message(
+            conversation_id=conversation_id,
+            content=user_message.content,
+            role=user_message.role,
+            parent_id=user_message.parent_id,
+            branch_name=final_branch_name,
+            llm_model=user_message.llm_model,
+            user_id=user_id,
+            created_at=datetime.utcnow()
+        )
+        
+        db.add(new_user_message)
+        db.commit()
+        db.refresh(new_user_message)
+        
+        return new_branch, new_user_message
+    
+    def regenerate_message_in_place(self, db: Session, conversation_id: str, message_id: str, user_id: str) -> tuple[str, str, str]:
+        """Regenerate an AI message in place by updating its content instead of deleting"""
+        # Get the AI message to regenerate
+        ai_message = db.query(Message).filter(
+            Message.id == message_id,
+            Message.conversation_id == conversation_id,
+            Message.user_id == user_id,
+            Message.role == "assistant"
+        ).first()
+        
+        if not ai_message:
+            raise ValueError("AI message not found or does not belong to user")
+        
+        # Check if this message has any children (follow-up messages)
+        children = db.query(Message).filter(
+            Message.parent_id == message_id,
+            Message.conversation_id == conversation_id,
+            Message.user_id == user_id
+        ).all()
+        
+        if children:
+            raise ValueError("Cannot regenerate message that has follow-up responses. Only the most recent message in a branch can be regenerated.")
+        
+        # Check if any branches were created from this message
+        branches_from_message = db.query(Branch).filter(
+            Branch.created_from_message_id == message_id,
+            Branch.conversation_id == conversation_id,
+            Branch.user_id == user_id
+        ).all()
+        
+        if branches_from_message:
+            raise ValueError("Cannot regenerate message that has branches created from it. Only the most recent message in a branch can be regenerated.")
+        
+        # Return the original message info for regeneration
+        return ai_message.id, ai_message.branch_name, ai_message.llm_model or "gpt-3.5-turbo"
+    
+    def create_branch_without_validation(self, db: Session, conversation_id: str, branch: BranchCreate, user_id: str) -> Branch:
+        """Create a new branch without name validation (for internal use)"""
+        db_branch = Branch(
+            conversation_id=conversation_id,
+            name=branch.name,
+            created_from_message_id=branch.created_from_message_id,
+            color=branch.color,
+            user_id=user_id,
+            created_at=datetime.utcnow()
+        )
+        db.add(db_branch)
+        db.commit()
+        db.refresh(db_branch)
+        return db_branch
     
     def build_conversation_tree(self, db: Session, conversation_id: str, user_id: str) -> ConversationTree:
         """Build the complete conversation tree structure"""

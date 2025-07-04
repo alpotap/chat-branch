@@ -16,6 +16,7 @@ interface MessageBubbleProps {
   onBranch: (messageId: string, branchName: string, color?: string) => void;
   onSelectMessage: (messageId: string) => void;
   onBranchSwitch: (messageId: string) => void;
+  onRegenerate: (messageId: string, type: 'branch' | 'place', branchName?: string) => void;
   isSelected: boolean;
   depth: number;
   conversationTree?: any; // Add conversation tree to access branch colors
@@ -26,6 +27,7 @@ const MessageBubble = memo<MessageBubbleProps>(({
   onBranch, 
   onSelectMessage, 
   onBranchSwitch,
+  onRegenerate,
   isSelected,
   depth,
   conversationTree 
@@ -33,7 +35,9 @@ const MessageBubble = memo<MessageBubbleProps>(({
   const [showContextMenu, setShowContextMenu] = useState(false);
   const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 });
   const [showBranchDialog, setShowBranchDialog] = useState(false);
+  const [showRegenBranchDialog, setShowRegenBranchDialog] = useState(false);
   const [branchName, setBranchName] = useState('');
+  const [regenBranchName, setRegenBranchName] = useState('');
   const [branchColor, setBranchColor] = useState('#3B82F6');
 
   const handleRightClick = useCallback((e: React.MouseEvent) => {
@@ -62,6 +66,26 @@ const MessageBubble = memo<MessageBubbleProps>(({
     }
   }, [branchName, branchColor, message.id, onBranch]);
 
+  // Regeneration handlers
+  const handleRegenInBranchClick = useCallback(() => {
+    setShowContextMenu(false);
+    setShowRegenBranchDialog(true);
+    setRegenBranchName(`regen-${message.branch_name}`);
+  }, [message.branch_name]);
+
+  const handleRegenInPlaceClick = useCallback(() => {
+    setShowContextMenu(false);
+    onRegenerate(message.id, 'place');
+  }, [message.id, onRegenerate]);
+
+  const handleCreateRegenBranch = useCallback(() => {
+    if (regenBranchName.trim()) {
+      onRegenerate(message.id, 'branch', regenBranchName.trim());
+      setShowRegenBranchDialog(false);
+      setRegenBranchName('');
+    }
+  }, [regenBranchName, message.id, onRegenerate]);
+
   const handleClick = useCallback(() => {
     onSelectMessage(message.id);
   }, [message.id, onSelectMessage]);
@@ -73,6 +97,47 @@ const MessageBubble = memo<MessageBubbleProps>(({
 
   const getBranchColor = (branchName: string) => {
     return getBranchColorFromTree(branchName, conversationTree);
+  };
+
+  // Check if this AI message is responding to the very first user message
+  const isResponseToFirstMessage = () => {
+    if (message.role !== 'assistant' || !conversationTree?.messages || !conversationTree?.root_messages) {
+      return false;
+    }
+    
+    // Find the user message that this AI message is responding to
+    // We need to search through all messages to find which user message has this AI message as a child
+    const allMessages = Object.values(conversationTree.messages) as Message[];
+    const parentUserMessage = allMessages.find((msg: Message) => 
+      msg.role === 'user' && 
+      msg.children && 
+      msg.children.some((child: Message) => child.id === message.id)
+    );
+    
+    if (!parentUserMessage) {
+      return false;
+    }
+    
+    // Check if the parent user message is a root message (first message in conversation)
+    return conversationTree.root_messages.includes(parentUserMessage.id);
+  };
+
+  // Check if this message has any children (follow-up messages)
+  const hasChildren = () => {
+    return message.children && message.children.length > 0;
+  };
+
+  // Check if this message has any branches created from it
+  const hasBranches = () => {
+    if (!conversationTree?.branches) return false;
+    return conversationTree.branches.some((branch: any) => 
+      branch.created_from_message_id === message.id
+    );
+  };
+
+  // Check if regeneration is allowed (no children and no branches)
+  const canRegenerate = () => {
+    return !hasChildren() && !hasBranches();
   };
 
   return (
@@ -122,6 +187,39 @@ const MessageBubble = memo<MessageBubbleProps>(({
             <button onClick={() => { onSelectMessage(message.id); setShowContextMenu(false); }}>
               📍 Navigate to Here
             </button>
+            <hr style={{ margin: '4px 0', border: 'none', borderTop: '1px solid #ddd' }} />
+            {canRegenerate() ? (
+              <>
+                {!isResponseToFirstMessage() && (
+                  <button onClick={handleRegenInBranchClick}>
+                    🔄 Re-generate in New Branch
+                  </button>
+                )}
+                <button 
+                  onClick={handleRegenInPlaceClick}
+                  style={{ display: 'flex', alignItems: 'center', gap: '4px' }}
+                  title="Warning: This will replace the current response"
+                >
+                  ⚠️ Re-generate in Place
+                  <span style={{ fontSize: '12px', color: '#666' }}>ⓘ</span>
+                </button>
+              </>
+            ) : (
+              <button 
+                disabled
+                style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '4px',
+                  opacity: 0.5,
+                  cursor: 'not-allowed'
+                }}
+                title="Cannot regenerate: This message has follow-up responses or branches"
+              >
+                🚫 Cannot Regenerate
+                <span style={{ fontSize: '12px', color: '#666' }}>ⓘ</span>
+              </button>
+            )}
           </div>
         </>
       )}
@@ -189,6 +287,36 @@ const MessageBubble = memo<MessageBubbleProps>(({
                 Create Branch
               </button>
               <button onClick={() => setShowBranchDialog(false)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Regeneration Branch Creation Dialog */}
+      {showRegenBranchDialog && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <h3>Regenerate Response in New Branch</h3>
+            <p>This will create a new branch and generate an alternative AI response.</p>
+            <p>Regenerating from: "{message.content.substring(0, 50)}..."</p>
+            <input
+              type="text"
+              placeholder="Enter branch name"
+              value={regenBranchName}
+              onChange={(e) => setRegenBranchName(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && handleCreateRegenBranch()}
+              autoFocus
+              autoComplete="off"
+              data-1p-ignore="true"
+              data-lpignore="true"
+            />
+            <div className="modal-buttons">
+              <button onClick={handleCreateRegenBranch} disabled={!regenBranchName.trim()}>
+                Create & Regenerate
+              </button>
+              <button onClick={() => setShowRegenBranchDialog(false)}>
                 Cancel
               </button>
             </div>

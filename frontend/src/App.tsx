@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { BrowserRouter as Router, Routes, Route, useParams, useNavigate } from 'react-router-dom';
+import axios from 'axios';
 import TreeView from './TreeView';
 import ConversationDebugger from './ConversationDebugger';
 import ConversationSidebar from './components/ConversationSidebar';
@@ -307,6 +308,47 @@ const ConversationApp: React.FC = () => {
     }
   }, [currentConversation, createBranch, loadConversation, setSelectedMessage]);
 
+  const handleRegenerate = useCallback(async (messageId: string, type: 'branch' | 'place', branchName?: string) => {
+    if (!currentConversation) return;
+
+    try {
+      if (type === 'branch') {
+        // Regenerate in new branch
+        const response = await axios.post(`http://localhost:8001/conversations/${currentConversation.id}/messages/${messageId}/regenerate-branch`, {
+          branch_name: branchName || 'regen-main'
+        });
+
+        console.log('✅ Branch regeneration successful:', response.data);
+        
+        // Reload conversation to get updated data
+        await loadConversation(currentConversation.id);
+        
+        // Switch to the new branch
+        setCurrentBranch(response.data.branch.name);
+        setViewMode('chat');
+        
+        // Show success message
+        console.log(`✅ ${response.data.message}`);
+        
+      } else {
+        // Regenerate in place
+        const response = await axios.post(`http://localhost:8001/conversations/${currentConversation.id}/messages/${messageId}/regenerate-place`);
+
+        console.log('✅ In-place regeneration successful:', response.data);
+        
+        // Reload conversation to get updated data
+        await loadConversation(currentConversation.id);
+      }
+    } catch (error) {
+      console.error('Regeneration error:', error);
+      if (axios.isAxiosError(error) && error.response) {
+        alert(`Failed to regenerate: ${error.response.data.detail || error.message}`);
+      } else {
+        alert('An error occurred during regeneration. Please try again.');
+      }
+    }
+  }, [currentConversation, loadConversation]);
+
   const handleMessageSelect = useCallback((messageId: string) => {
     // In tree view, always switch branch if message is from different branch
     // In chat view, only select message without switching branch
@@ -471,6 +513,7 @@ const ConversationApp: React.FC = () => {
                   onBranch={handleCreateBranch}
                   onSelectMessage={handleMessageSelect}
                   onBranchSwitch={handleBranchSwitch}
+                  onRegenerate={handleRegenerate}
                   onRenameBranch={handleRenameBranch}
                   conversationTree={conversationTree}
                 />

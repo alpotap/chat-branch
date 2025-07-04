@@ -292,19 +292,22 @@ async def create_branch(
     db: Session = Depends(get_db)
 ):
     """Create a new branch from a specific message"""
-    # Validate conversation belongs to user
-    conversation = conversation_service.get_conversation(db, conversation_id, current_user.id)
-    if not conversation:
-        raise HTTPException(status_code=404, detail="Conversation not found")
-    
-    db_branch = conversation_service.create_branch(db, conversation_id, branch, current_user.id)
-    return BranchResponse(
-        id=str(db_branch.id),
-        name=db_branch.name,
-        created_from_message_id=str(db_branch.created_from_message_id),
-        created_at=db_branch.created_at,
-        color=db_branch.color
-    )
+    try:
+        # Validate conversation belongs to user
+        conversation = conversation_service.get_conversation(db, conversation_id, current_user.id)
+        if not conversation:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        
+        db_branch = conversation_service.create_branch(db, conversation_id, branch, current_user.id)
+        return BranchResponse(
+            id=str(db_branch.id),
+            name=db_branch.name,
+            created_from_message_id=str(db_branch.created_from_message_id),
+            created_at=db_branch.created_at,
+            color=db_branch.color
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/conversations/{conversation_id}/context/{message_id}")
 async def get_message_context(
@@ -342,11 +345,184 @@ async def get_message_context(
 @app.get("/conversations/{conversation_id}/branches")
 async def get_branches(
     conversation_id: str,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """Get all branches in a conversation"""
-    branches = conversation_service.get_branches(db, conversation_id)
+    branches = conversation_service.get_branches(db, conversation_id, current_user.id)
     return {"branches": branches}
+
+@app.post("/conversations/{conversation_id}/messages/{message_id}/regenerate-branch")
+async def regenerate_message_in_branch(
+    conversation_id: str,
+    message_id: str,
+    request_body: dict,  # {"branch_name": "regen-main"}
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Regenerate an AI message by creating a new branch and copying the user message"""
+    try:
+        # Validate conversation belongs to user
+        conversation = conversation_service.get_conversation(db, conversation_id, current_user.id)
+        if not conversation:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        
+        # Get branch name from request body
+        branch_name = request_body.get("branch_name", "regen-main")
+        
+        # Create the regeneration branch and get the copied user message
+        new_branch, new_user_message = conversation_service.regenerate_message_in_branch(
+            db, conversation_id, message_id, branch_name, current_user.id
+        )
+        
+        # Generate AI response for the copied user message
+        context = conversation_service.get_message_context(
+            db, conversation_id, new_branch.name, current_user.id
+        )
+        
+        # Get the original AI message to use the same LLM model
+        original_ai_message = db.query(Message).filter(
+            Message.id == message_id,
+            Message.conversation_id == conversation_id,
+            Message.user_id == current_user.id,
+            Message.role == "assistant"
+        ).first()
+        
+        llm_model = original_ai_message.llm_model if original_ai_message else "gpt-3.5-turbo"
+        
+        # Generate AI response
+        ai_response = await llm_service.generate_response(context, llm_model)
+        
+        # Create the AI message in the new branch
+        ai_message_create = MessageCreate(
+            content=ai_response,
+            role="assistant",
+            parent_id=str(new_user_message.id),  # Convert UUID to string
+            branch_name=new_branch.name,
+            llm_model=llm_model
+        )
+        
+        ai_message = conversation_service.add_message(db, conversation_id, ai_message_create, current_user.id)
+        
+        return {
+            "success": True,
+            "branch": {
+                "id": str(new_branch.id),
+                "name": new_branch.name,
+                "color": new_branch.color,
+                "created_from_message_id": str(new_branch.created_from_message_id)
+            },
+            "user_message": {
+                "id": str(new_user_message.id),
+                "content": new_user_message.content,
+                "role": new_user_message.role,
+                "branch_name": new_user_message.branch_name
+            },
+            "ai_message": {
+                "id": str(ai_message.id),
+                "content": ai_message.content,
+                "role": ai_message.role,
+                "branch_name": ai_message.branch_name
+            },
+            "message": f"Created branch '{new_branch.name}' with regenerated response"
+        }
+        
+    except ValueError as e:
+        print(f"❌ Branch regeneration validation error: {str(e)}")
+        raise HTTPException(status_code=400, detail="Unable to regenerate this message. Please try regenerating the most recent message in the conversation.")
+    except Exception as e:
+        print(f"❌ Branch regeneration unexpected error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="An error occurred while regenerating the message. Please try again.")
+
+@app.post("/conversations/{conversation_id}/messages/{message_id}/regenerate-place")
+async def regenerate_message_in_place(
+    conversation_id: str,
+    message_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Regenerate an AI message in place by deleting the old one"""
+    try:
+        # Validate conversation belongs to user
+        conversation = conversation_service.get_conversation(db, conversation_id, current_user.id)
+        if not conversation:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        
+        # Get the message to regenerate
+        ai_message = db.query(Message).filter(
+            Message.id == message_id,
+            Message.conversation_id == conversation_id,
+            Message.user_id == current_user.id,
+            Message.role == "assistant"
+        ).first()
+        
+        if not ai_message:
+            raise HTTPException(status_code=404, detail="AI message not found")
+        
+        # Get the user message that prompted this AI response for regeneration
+        user_message = db.query(Message).filter(
+            Message.id == ai_message.parent_id,
+            Message.conversation_id == conversation_id,
+            Message.user_id == current_user.id,
+            Message.role == "user"
+        ).first()
+        
+        if not user_message:
+            raise HTTPException(status_code=404, detail="Parent user message not found")
+        
+        # Get the message info for regeneration (this validates it can be regenerated)
+        message_id, branch_name, llm_model = conversation_service.regenerate_message_in_place(
+            db, conversation_id, message_id, current_user.id
+        )
+        
+        # Get the user message that prompted this AI response for regeneration
+        user_message = db.query(Message).filter(
+            Message.id == ai_message.parent_id,
+            Message.conversation_id == conversation_id,
+            Message.user_id == current_user.id,
+            Message.role == "user"
+        ).first()
+        
+        if not user_message:
+            raise HTTPException(status_code=404, detail="Parent user message not found")
+        
+        # Generate new AI response
+        context = conversation_service.get_message_context(
+            db, conversation_id, branch_name, current_user.id
+        )
+        
+        # Generate AI response using LLM service
+        ai_response = await llm_service.generate_response(
+            context,
+            llm_model
+        )
+        
+        # Update the existing AI message content instead of deleting and recreating
+        ai_message.content = ai_response
+        ai_message.created_at = datetime.utcnow()  # Update timestamp
+        db.commit()
+        db.refresh(ai_message)
+        
+        return MessageResponse(
+            id=str(ai_message.id),
+            content=ai_message.content,
+            role=ai_message.role,
+            parent_id=str(ai_message.parent_id) if ai_message.parent_id else None,
+            branch_name=ai_message.branch_name,
+            llm_model=ai_message.llm_model,
+            created_at=ai_message.created_at
+        )
+        
+    except ValueError as e:
+        print(f"❌ In-place regeneration validation error: {str(e)}")
+        raise HTTPException(status_code=400, detail="Unable to regenerate this message. Please try regenerating the most recent message in the conversation.")
+    except Exception as e:
+        print(f"❌ In-place regeneration unexpected error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="An error occurred while regenerating the message. Please try again.")
 
 @app.get("/conversations/{conversation_id}/debug")
 async def debug_conversation(
@@ -418,40 +594,64 @@ async def delete_branch(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Delete a branch and all its messages"""
-    # Check if conversation exists and belongs to user
-    conversation = conversation_service.get_conversation(db, conversation_id, current_user.id)
-    if not conversation:
-        raise HTTPException(status_code=404, detail="Conversation not found")
-    
-    # Cannot delete main branch
-    if branch_name == "main":
-        raise HTTPException(status_code=400, detail="Cannot delete main branch")
-    
-    # Delete all messages in the branch
-    messages = db.query(Message).filter(
-        Message.conversation_id == conversation_id,
-        Message.branch_name == branch_name
-    ).all()
-    
-    if not messages:
-        raise HTTPException(status_code=404, detail="Branch not found")
-    
-    for message in messages:
-        db.delete(message)
-    
-    # Delete the branch record
-    branch_record = db.query(Branch).filter(
-        Branch.conversation_id == conversation_id,
-        Branch.name == branch_name
-    ).first()
-    
-    if branch_record:
-        db.delete(branch_record)
-    
-    db.commit()
-    
-    return {"message": "Branch deleted successfully", "branch_name": branch_name}
+    """Delete a branch and all its messages with cascading delete of dependent branches"""
+    try:
+        # Check if conversation exists and belongs to user
+        conversation = conversation_service.get_conversation(db, conversation_id, current_user.id)
+        if not conversation:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        
+        # Cannot delete main branch
+        if branch_name == "main":
+            raise HTTPException(status_code=400, detail="Cannot delete main branch")
+        
+        # Use cascading delete to remove the branch and all dependent branches
+        deleted_branches = conversation_service.delete_branch_with_cascading(db, conversation_id, branch_name, current_user.id)
+        
+        return {
+            "message": f"Successfully deleted branch '{branch_name}' and {len(deleted_branches)-1} dependent branches",
+            "deleted_branches": deleted_branches
+        }
+        
+    except ValueError as e:
+        print(f"❌ Branch deletion validation error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        print(f"❌ Branch deletion unexpected error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Failed to delete branch")
+
+@app.get("/conversations/{conversation_id}/branches/{branch_name}/dependents")
+async def get_dependent_branches(
+    conversation_id: str,
+    branch_name: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get all branches that depend on the specified branch"""
+    try:
+        # Check if conversation exists and belongs to user
+        conversation = conversation_service.get_conversation(db, conversation_id, current_user.id)
+        if not conversation:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        
+        # Get dependent branches
+        dependent_branches = conversation_service.get_dependent_branches(db, conversation_id, branch_name, current_user.id)
+        
+        return {
+            "branch_name": branch_name,
+            "dependent_branches": dependent_branches
+        }
+        
+    except ValueError as e:
+        print(f"❌ Error getting dependent branches: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        print(f"❌ Error getting dependent branches: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Failed to get dependent branches")
 
 if __name__ == "__main__":
     import uvicorn

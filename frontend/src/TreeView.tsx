@@ -147,8 +147,9 @@ const TreeView: React.FC<TreeViewProps> = ({
             <div 
               className={`tree-node ${message.role} ${selectedMessage === message.id ? 'selected' : ''}`}
               onClick={() => onMessageSelect(message.id)}
+              onDoubleClick={() => onSwitchToChatView(message.branch_name, message.id)}
               onContextMenu={(e) => message.role === 'assistant' ? handleRightClick(e, message) : undefined}
-              title={message.role === 'assistant' ? "Click to select. Right-click to create branch." : "Click to select message"}
+              title={message.role === 'assistant' ? "Click to select. Double-click to switch to chat view. Right-click to create branch." : "Click to select. Double-click to switch to chat view."}
             >
               <div className="tree-node-header">
                 <span className="role-badge">{message.role}</span>
