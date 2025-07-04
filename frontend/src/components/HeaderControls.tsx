@@ -1,4 +1,4 @@
-import React, { memo, useCallback } from 'react';
+import React, { useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 
 interface HeaderControlsProps {
@@ -19,7 +19,7 @@ interface HeaderControlsProps {
   hasMessages?: boolean; // New prop to check if conversation has messages
 }
 
-const HeaderControls = memo(({
+const HeaderControls: React.FC<HeaderControlsProps> = ({
   currentConversation,
   currentBranch,
   availableBranches,
@@ -35,8 +35,8 @@ const HeaderControls = memo(({
   canGoForward,
   onGoForward,
   hasMessages = false
-}: HeaderControlsProps) => {
-  const { user, logout } = useAuth();
+}) => {
+  const { user, logout, loading } = useAuth();
 
   const handleModelChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
     onModelChange(e.target.value);
@@ -98,7 +98,7 @@ const HeaderControls = memo(({
                 className="delete-branch-btn"
                 title="Delete current branch"
               >
-                �️
+                🗑️
               </button>
             )}
           </div>
@@ -143,13 +143,22 @@ const HeaderControls = memo(({
         {/* User info and logout */}
         <div className="user-controls">
           <span className="user-info">
-            👤 {user?.name || user?.email}
-            {user?.is_admin && <span className="admin-badge"> (Admin)</span>}
+            {loading ? (
+              <span style={{ color: '#666', fontStyle: 'italic' }}>🔄 Loading user...</span>
+            ) : user ? (
+              <>
+                👤 {user?.name || user?.email}
+                {user?.is_admin && <span className="admin-badge"> (Admin)</span>}
+              </>
+            ) : (
+              <span style={{ color: '#999', fontStyle: 'italic' }}>❓ No user</span>
+            )}
           </span>
           <button 
             onClick={handleLogout}
             className="logout-btn"
             title="Logout"
+            disabled={loading || !user}
           >
             🚪 Logout
           </button>
@@ -157,7 +166,7 @@ const HeaderControls = memo(({
       </div>
     </div>
   );
-});
+};
 
 HeaderControls.displayName = 'HeaderControls';
 

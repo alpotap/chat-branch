@@ -287,9 +287,11 @@ const ConversationApp: React.FC = () => {
 
     const success = await createBranch(currentConversation.id, messageId, branchName, color);
     if (success) {
+      // First, reload the conversation to get the updated data
+      await loadConversation(currentConversation.id);
+      // Then update the UI state
       setCurrentBranch(branchName);
       setSelectedMessage(messageId);
-      await loadConversation(currentConversation.id);
       // Switch to chat view after creating branch for immediate use
       setViewMode('chat');
     }
@@ -413,6 +415,7 @@ const ConversationApp: React.FC = () => {
                     onSwitchToChatView={handleSwitchToChatView}
                     onCreateBranch={handleCreateBranch}
                     selectedMessage={selectedMessage || undefined}
+                    conversationTree={conversationTree}
                   />
                 </div>
               ) : viewMode === 'debug' && debugMode ? (
@@ -462,16 +465,27 @@ const Home: React.FC = () => {
     loadConversations();
   }, [loadConversations]);
 
-  const handleCreateConversation = useCallback(async (title?: string) => {
-    const newConv = await createConversation(title);
-    if (newConv) {
-      navigate(`/conversation/${newConv.id}`);
-    }
-  }, [createConversation, navigate]);
-
   const handleLoadConversation = useCallback(async (conversationId: string) => {
     navigate(`/conversation/${conversationId}`);
   }, [navigate]);
+
+  const handleCreateConversation = useCallback(async (title?: string) => {
+    console.log('🔧 Creating new conversation...');
+    try {
+      const newConv = await createConversation(title);
+      if (newConv) {
+        console.log('✅ Conversation created:', newConv);
+        // Navigate to the new conversation
+        navigate(`/conversation/${newConv.id}`);
+      } else {
+        console.error('❌ Failed to create conversation - no response');
+        alert('Failed to create conversation. Please try again.');
+      }
+    } catch (error) {
+      console.error('❌ Error creating conversation:', error);
+      alert('Failed to create conversation. Please try again.');
+    }
+  }, [createConversation, navigate]);
 
   const handleRenameConversation = useCallback(async (conversationId: string, newTitle: string) => {
     await renameConversation(conversationId, newTitle);
@@ -490,11 +504,23 @@ const Home: React.FC = () => {
 
   return (
     <div className="App">
-      <div className="header">
-        <div className="header-left">
-          <h1>🌳 ChatBranch</h1>
-        </div>
-      </div>
+      <HeaderControls
+        currentConversation={null}
+        currentBranch=""
+        availableBranches={[]}
+        onBranchChange={() => {}}
+        onDeleteBranch={() => {}}
+        viewMode="chat"
+        onViewModeChange={() => {}}
+        selectedModel="gpt-3.5-turbo"
+        onModelChange={() => {}}
+        debugMode={false}
+        canGoBack={false}
+        onGoBack={() => {}}
+        canGoForward={false}
+        onGoForward={() => {}}
+        hasMessages={false}
+      />
       <div className="main-container">
         <ConversationSidebar
           conversations={conversations}

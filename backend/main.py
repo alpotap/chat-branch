@@ -341,10 +341,11 @@ async def fix_conversation(
 async def rename_conversation(
     conversation_id: str,
     new_title: str,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """Rename a conversation"""
-    conversation = conversation_service.get_conversation(db, conversation_id)
+    conversation = conversation_service.get_conversation(db, conversation_id, current_user.id)
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversation not found")
     
@@ -357,11 +358,12 @@ async def rename_branch(
     conversation_id: str,
     branch_name: str,
     new_branch_name: str,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """Rename a branch and update all messages in that branch"""
-    # Check if conversation exists
-    conversation = conversation_service.get_conversation(db, conversation_id)
+    # Check if conversation exists and belongs to user
+    conversation = conversation_service.get_conversation(db, conversation_id, current_user.id)
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversation not found")
     
@@ -384,11 +386,12 @@ async def rename_branch(
 async def delete_branch(
     conversation_id: str,
     branch_name: str,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """Delete a branch and all its messages"""
-    # Check if conversation exists
-    conversation = conversation_service.get_conversation(db, conversation_id)
+    # Check if conversation exists and belongs to user
+    conversation = conversation_service.get_conversation(db, conversation_id, current_user.id)
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversation not found")
     

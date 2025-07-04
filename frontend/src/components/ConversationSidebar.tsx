@@ -69,6 +69,14 @@ const ConversationSidebar = memo(({
           <div 
             key={conv.id} 
             className={`conversation-item ${currentConversation?.id === conv.id ? 'active' : ''}`}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              padding: '8px 12px',
+              cursor: 'pointer',
+              borderRadius: '4px',
+              margin: '2px 0'
+            }}
           >
             {renamingId === conv.id ? (
               <div className="rename-input-container">
@@ -80,16 +88,35 @@ const ConversationSidebar = memo(({
                   onBlur={() => handleRename(conv.id)}
                   autoFocus
                   className="rename-input"
+                  autoComplete="off"
+                  data-1p-ignore="true"
+                  data-lpignore="true"
                 />
                 <button onClick={() => handleRename(conv.id)} className="rename-save-btn">✓</button>
                 <button onClick={cancelRename} className="rename-cancel-btn">✕</button>
               </div>
             ) : (
               <>
-                <span onClick={() => onLoadConversation(conv.id)} className="conversation-title">
-                  {conv.title}
-                </span>
-                <div className="conversation-actions">
+                <div 
+                  onClick={() => onLoadConversation(conv.id)} 
+                  className="conversation-main-content"
+                  style={{
+                    flex: 1,
+                    cursor: 'pointer',
+                    padding: '8px 0',
+                    overflow: 'hidden'
+                  }}
+                >
+                  <span className="conversation-title">
+                    {conv.title}
+                  </span>
+                </div>
+                <div className="conversation-actions" style={{
+                  display: 'flex',
+                  gap: '4px',
+                  marginLeft: '8px',
+                  flexShrink: 0
+                }}>
                   <button 
                     onClick={(e) => {
                       e.stopPropagation();
@@ -97,6 +124,14 @@ const ConversationSidebar = memo(({
                     }}
                     className="rename-btn"
                     title="Rename conversation"
+                    style={{
+                      padding: '4px 6px',
+                      fontSize: '12px',
+                      border: 'none',
+                      background: 'transparent',
+                      cursor: 'pointer',
+                      borderRadius: '2px'
+                    }}
                   >
                     ✏️
                   </button>
@@ -109,6 +144,15 @@ const ConversationSidebar = memo(({
                     }}
                     className="delete-btn"
                     title="Delete conversation"
+                    style={{
+                      padding: '4px 6px',
+                      fontSize: '12px',
+                      border: 'none',
+                      background: 'transparent',
+                      cursor: 'pointer',
+                      borderRadius: '2px',
+                      color: '#dc3545'
+                    }}
                   >
                     🗑️
                   </button>
@@ -131,6 +175,9 @@ const ConversationSidebar = memo(({
               onChange={(e) => setNewConversationTitle(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && handleCreateConversation()}
               autoFocus
+              autoComplete="off"
+              data-1p-ignore="true"
+              data-lpignore="true"
             />
             <div className="modal-buttons">
               <button onClick={handleCreateConversation}>

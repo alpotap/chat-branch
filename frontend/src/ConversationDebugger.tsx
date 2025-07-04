@@ -61,6 +61,9 @@ const ConversationDebugger: React.FC = () => {
           value={conversationId}
           onChange={(e) => setConversationId(e.target.value)}
           style={{ width: '300px', marginRight: '10px', padding: '5px' }}
+          autoComplete="off"
+          data-1p-ignore="true"
+          data-lpignore="true"
         />
         <button onClick={debugConversation} disabled={loading}>
           {loading ? 'Debugging...' : 'Debug'}

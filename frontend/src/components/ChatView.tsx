@@ -76,6 +76,9 @@ const ChatView = memo(({
                 onBlur={handleBranchRename}
                 autoFocus
                 className="branch-rename-input"
+                autoComplete="off"
+                data-1p-ignore="true"
+                data-lpignore="true"
               />
               <button onClick={handleBranchRename} className="rename-save-btn">✓</button>
               <button onClick={cancelBranchRename} className="rename-cancel-btn">✕</button>
@@ -108,6 +111,7 @@ const ChatView = memo(({
             onBranchSwitch={onBranchSwitch}
             isSelected={selectedMessage === message.id}
             depth={0}
+            conversationTree={conversationTree}
           />
         ))}
       </div>

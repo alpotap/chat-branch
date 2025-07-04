@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useMemo } from 'react';
 import axios from 'axios';
 
 interface User {
@@ -28,28 +28,34 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   useEffect(() => {
     // Check for stored token on app load
+    console.log('🔍 AuthContext: Checking for stored token...');
     const storedToken = localStorage.getItem('chatbranch_token');
     if (storedToken) {
+      console.log('🔑 AuthContext: Found stored token, verifying...');
       verifyToken(storedToken);
     } else {
+      console.log('❌ AuthContext: No stored token found');
       setLoading(false);
     }
   }, []);
 
   const verifyToken = async (authToken: string) => {
     try {
+      console.log('🔄 AuthContext: Verifying token with server...');
       const response = await axios.get(`${API_BASE}/auth/me`, {
         headers: { Authorization: `Bearer ${authToken}` }
       });
+      console.log('✅ AuthContext: Token verified, user:', response.data);
       setUser(response.data);
       setToken(authToken);
       // Set default axios header for future requests
       axios.defaults.headers.common['Authorization'] = `Bearer ${authToken}`;
     } catch (error) {
-      console.error('Token verification failed:', error);
+      console.error('❌ AuthContext: Token verification failed:', error);
       localStorage.removeItem('chatbranch_token');
       delete axios.defaults.headers.common['Authorization'];
     } finally {
+      console.log('🏁 AuthContext: Verification complete, setting loading to false');
       setLoading(false);
     }
   };
@@ -87,14 +93,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     delete axios.defaults.headers.common['Authorization'];
   };
 
-  const value: AuthContextType = {
+  const value: AuthContextType = useMemo(() => ({
     user,
     token,
     login,
     logout,
     loading,
     isAuthenticated: !!user && !!token
-  };
+  }), [user, token, login, logout, loading]);
 
   return (
     <AuthContext.Provider value={value}>

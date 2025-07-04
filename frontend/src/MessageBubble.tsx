@@ -1,5 +1,5 @@
 import React, { useState, memo, useCallback } from 'react';
-import { getBranchColor as getUtilBranchColor, getRandomBranchColor, BRANCH_COLORS } from './utils/branchColors';
+import { getBranchColor as getUtilBranchColor, getBranchColorFromTree, getRandomBranchColor, BRANCH_COLORS } from './utils/branchColors';
 
 interface Message {
   id: string;
@@ -18,6 +18,7 @@ interface MessageBubbleProps {
   onBranchSwitch: (messageId: string) => void;
   isSelected: boolean;
   depth: number;
+  conversationTree?: any; // Add conversation tree to access branch colors
 }
 
 const MessageBubble = memo<MessageBubbleProps>(({ 
@@ -26,7 +27,8 @@ const MessageBubble = memo<MessageBubbleProps>(({
   onSelectMessage, 
   onBranchSwitch,
   isSelected,
-  depth 
+  depth,
+  conversationTree 
 }) => {
   const [showContextMenu, setShowContextMenu] = useState(false);
   const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 });
@@ -70,7 +72,7 @@ const MessageBubble = memo<MessageBubbleProps>(({
   }, [message.id, onBranchSwitch]);
 
   const getBranchColor = (branchName: string) => {
-    return getUtilBranchColor(branchName);
+    return getBranchColorFromTree(branchName, conversationTree);
   };
 
   return (
@@ -137,6 +139,9 @@ const MessageBubble = memo<MessageBubbleProps>(({
               onChange={(e) => setBranchName(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && handleCreateBranch()}
               autoFocus
+              autoComplete="off"
+              data-1p-ignore="true"
+              data-lpignore="true"
             />
             <div className="color-selection">
               <label>Branch Color:</label>
@@ -146,13 +151,29 @@ const MessageBubble = memo<MessageBubbleProps>(({
                   value={branchColor}
                   onChange={(e) => setBranchColor(e.target.value)}
                   className="color-picker"
+                  style={{
+                    width: '40px',
+                    height: '40px',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                  }}
                 />
                 <div className="color-presets">
                   {BRANCH_COLORS.presets.map(color => (
                     <button
                       key={color}
                       className={`color-preset ${branchColor === color ? 'selected' : ''}`}
-                      style={{ backgroundColor: color }}
+                      style={{ 
+                        backgroundColor: color,
+                        border: branchColor === color ? '3px solid #000' : '2px solid #ccc',
+                        borderRadius: '8px',
+                        width: '32px',
+                        height: '32px',
+                        cursor: 'pointer',
+                        transition: 'border 0.2s'
+                      }}
                       onClick={() => setBranchColor(color)}
                       title={color}
                     />

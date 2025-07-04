@@ -35,6 +35,25 @@ export const getBranchColor = (branchName: string, customColor?: string): string
   return BRANCH_COLORS.presets[colorIndex];
 };
 
+// Helper function to get branch color from conversation tree
+export const getBranchColorFromTree = (branchName: string, conversationTree?: any): string => {
+  // Main branch is always green
+  if (branchName === 'main') {
+    return BRANCH_COLORS.main;
+  }
+  
+  // Look up stored color from conversation tree
+  if (conversationTree?.branches) {
+    const branch = conversationTree.branches.find((b: any) => b.name === branchName);
+    if (branch && branch.color) {
+      return branch.color;
+    }
+  }
+  
+  // Fallback to hash-based color selection from presets
+  return getBranchColor(branchName);
+};
+
 export const getRandomBranchColor = (): string => {
   const randomIndex = Math.floor(Math.random() * BRANCH_COLORS.presets.length);
   return BRANCH_COLORS.presets[randomIndex];
