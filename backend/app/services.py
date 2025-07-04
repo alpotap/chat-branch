@@ -569,8 +569,13 @@ class ConversationService:
                 root_messages.append(str(msg.id))
         
         # Debug output
-        print(f"🌱 Root messages: {len(root_messages)}")
-        print(f"🔗 Orphaned messages: {len(orphaned_messages)}")
+        print(f"🌱 Root messages: {len(root_messages)} - {root_messages}")
+        print(f"🔗 Orphaned messages: {len(orphaned_messages)} - {orphaned_messages}")
+        
+        # Additional debug: show all messages and their parent relationships
+        print("📝 All messages in conversation:")
+        for msg in messages:
+            print(f"  {msg.id}: role={msg.role}, branch={msg.branch_name}, parent_id={msg.parent_id}")
         
         # Get branches
         branches = self.get_branches(db, conversation_id, user_id)

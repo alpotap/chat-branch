@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { BrowserRouter as Router, Routes, Route, useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import TreeView from './TreeView';
@@ -56,6 +56,10 @@ const ConversationApp: React.FC = () => {
   const [isNavigating, setIsNavigating] = useState(false);
   const [intentionallyDeselected, setIntentionallyDeselected] = useState(false);
   
+  // Message queue to prevent race conditions
+  // Simple lock to prevent race conditions - much more reliable than complex queue
+  const sendingLockRef = useRef(false);
+  
   // Error modal state
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
@@ -79,6 +83,7 @@ const ConversationApp: React.FC = () => {
     newMessage,
     setNewMessage,
     loading,
+    setLoading,
     sendMessage,
     createBranch
   } = useMessages();
@@ -236,6 +241,23 @@ const ConversationApp: React.FC = () => {
     setDebugMode(urlParams.get('debug') === 'true');
   }, []);
 
+  // Debug effect for TreeView data
+  useEffect(() => {
+    if (viewMode === 'tree' && conversationTree) {
+      console.log('🔍 ConversationTree Debug:', {
+        root_messages: conversationTree.root_messages,
+        message_count: Object.keys(conversationTree.messages).length,
+        branches: conversationTree.branches?.map(b => b.name),
+        sample_messages: Object.values(conversationTree.messages).slice(0, 5).map(m => ({
+          id: m.id,
+          role: m.role,
+          branch: m.branch_name,
+          children_count: m.children?.length || 0
+        }))
+      });
+    }
+  }, [viewMode, conversationTree]);
+
   // Auto-select last message when conversation/branch changes (but not during navigation)
   useEffect(() => {
     if (!isNavigating && !intentionallyDeselected && allBranchMessages.length > 0 && conversationTree) {
@@ -302,21 +324,69 @@ const ConversationApp: React.FC = () => {
   }, [currentConversation, conversations, deleteConversation, setSelectedMessage, setShowAllMessages, showError]);
 
   const handleSendMessage = useCallback(async () => {
-    if (!currentConversation) return;
+    if (!currentConversation || !newMessage.trim()) return;
     
-    const success = await sendMessage(
-      currentConversation.id,
-      newMessage,
-      selectedModel,
-      currentBranch,
-      selectedMessage || undefined
-    );
-    
-    if (success) {
-      await loadConversation(currentConversation.id);
+    // Simple lock mechanism - if already sending, ignore the request
+    if (sendingLockRef.current) {
+      console.log('🔒 Message send blocked - already processing another message');
+      return;
     }
-  }, [currentConversation, newMessage, selectedModel, currentBranch, selectedMessage, sendMessage, loadConversation]);
-
+    
+    // Acquire lock immediately
+    sendingLockRef.current = true;
+    setLoading(true);
+    
+    try {
+      const messageText = newMessage.trim();
+      
+      // Always use the last message in the current branch as parent (unless it's the first message)
+      let parentId: string | undefined = undefined;
+      if (allBranchMessages.length > 0) {
+        const lastMessage = allBranchMessages[allBranchMessages.length - 1];
+        parentId = lastMessage.id;
+        console.log(`🔍 DEBUG: Using last message as parent:`, {
+          currentBranch,
+          lastMessageId: lastMessage.id,
+          lastMessageRole: lastMessage.role,
+          lastMessageContent: lastMessage.content.substring(0, 50) + '...',
+          allBranchMessagesCount: allBranchMessages.length,
+          allBranchMessagesDetails: allBranchMessages.map(msg => ({
+            id: msg.id.substring(0, 8) + '...',
+            role: msg.role,
+            created_at: msg.created_at,
+            content: msg.content.substring(0, 30) + '...'
+          }))
+        });
+      } else {
+        console.log(`🔍 DEBUG: No messages in current branch, using null parent (root message)`);
+      }
+      
+      console.log(`🔍 DEBUG: Sending message with parent_id: ${parentId || 'null'}`);
+      
+      const success = await sendMessage(
+        currentConversation.id,
+        messageText,
+        selectedModel,
+        currentBranch,
+        parentId
+      );
+      
+      if (success) {
+        // Clear selected message so subsequent messages use the most recent message as parent
+        setSelectedMessage(null);
+        setIntentionallyDeselected(false);
+        setNewMessage(''); // Clear input
+        await loadConversation(currentConversation.id);
+      }
+    } catch (error) {
+      console.error('Error sending message:', error);
+    } finally {
+      // Always release lock and stop loading
+      sendingLockRef.current = false;
+      setLoading(false);
+    }
+  }, [currentConversation, newMessage, allBranchMessages, currentBranch, selectedModel, sendMessage, setSelectedMessage, setIntentionallyDeselected, setNewMessage, loadConversation, setLoading]);
+    setNewMessage('');
   const handleCreateBranch = useCallback(async (messageId: string, branchName: string, color?: string) => {
     if (!currentConversation) return;
 
