@@ -12,7 +12,7 @@ import ReactFlow, {
   MiniMap,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
-import { getBranchColor } from './utils/branchColors';
+import { getBranchColorFromTree, BRANCH_COLORS, getRandomBranchColor } from './utils/branchColors';
 
 interface Message {
   id: string;
@@ -29,8 +29,9 @@ interface TreeViewProps {
   rootMessages: string[];
   onMessageSelect: (messageId: string) => void;
   onSwitchToChatView: (branchName: string, messageId: string) => void;
-  onCreateBranch: (messageId: string, branchName: string) => void;
+  onCreateBranch: (messageId: string, branchName: string, color?: string) => void;
   selectedMessage?: string;
+  conversationTree?: any; // Add conversation tree for branch colors
 }
 
 const TreeView: React.FC<TreeViewProps> = ({ 
@@ -39,7 +40,8 @@ const TreeView: React.FC<TreeViewProps> = ({
   onMessageSelect, 
   onSwitchToChatView,
   onCreateBranch,
-  selectedMessage 
+  selectedMessage,
+  conversationTree
 }) => {
   const [, , onNodesChange] = useNodesState([]);
   const [, setEdges, onEdgesChange] = useEdgesState([]);
@@ -48,6 +50,12 @@ const TreeView: React.FC<TreeViewProps> = ({
   const [contextMenuMessage, setContextMenuMessage] = React.useState<Message | null>(null);
   const [showBranchDialog, setShowBranchDialog] = React.useState(false);
   const [branchName, setBranchName] = React.useState('');
+  const [branchColor, setBranchColor] = React.useState('#3B82F6');
+
+  // Function to get branch color from conversation tree
+  const getBranchColor = (branchName: string) => {
+    return getBranchColorFromTree(branchName, conversationTree);
+  };
 
   const handleRightClick = (e: React.MouseEvent, message: Message) => {
     e.preventDefault();
@@ -59,9 +67,10 @@ const TreeView: React.FC<TreeViewProps> = ({
 
   const handleCreateBranch = () => {
     if (branchName.trim() && contextMenuMessage) {
-      onCreateBranch(contextMenuMessage.id, branchName.trim());
+      onCreateBranch(contextMenuMessage.id, branchName.trim(), branchColor);
       setShowBranchDialog(false);
       setBranchName('');
+      setBranchColor('#3B82F6');
       setShowContextMenu(false);
       setContextMenuMessage(null);
     }
@@ -140,7 +149,7 @@ const TreeView: React.FC<TreeViewProps> = ({
               onClick={() => onMessageSelect(message.id)}
               onDoubleClick={() => onSwitchToChatView(message.branch_name, message.id)}
               onContextMenu={(e) => message.role === 'assistant' ? handleRightClick(e, message) : undefined}
-              title={message.role === 'assistant' ? "Double-click to open chat view for this branch. Right-click to create branch." : "Double-click to open chat view for this branch"}
+              title={message.role === 'assistant' ? "Click to select. Double-click to switch to chat view. Right-click to create branch." : "Click to select. Double-click to switch to chat view."}
             >
               <div className="tree-node-header">
                 <span className="role-badge">{message.role}</span>
@@ -246,6 +255,7 @@ const TreeView: React.FC<TreeViewProps> = ({
                 setShowContextMenu(false);
                 setShowBranchDialog(true);
                 setBranchName(`Branch-${Date.now()}`);
+                setBranchColor(getRandomBranchColor()); // Set random color as default
               }}
               style={{
                 width: '100%',
@@ -292,6 +302,9 @@ const TreeView: React.FC<TreeViewProps> = ({
               onChange={(e) => setBranchName(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && handleCreateBranch()}
               autoFocus
+              autoComplete="off"
+              data-1p-ignore="true"
+              data-lpignore="true"
               style={{
                 width: '100%',
                 padding: '8px',
@@ -300,6 +313,46 @@ const TreeView: React.FC<TreeViewProps> = ({
                 borderRadius: '4px'
               }}
             />
+            <div className="color-selection" style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>Branch Color:</label>
+              <div className="color-options" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <input
+                  type="color"
+                  value={branchColor}
+                  onChange={(e) => setBranchColor(e.target.value)}
+                  className="color-picker"
+                  style={{
+                    width: '40px',
+                    height: '40px',
+                    border: 'none',
+                    borderRadius: '8px',
+                    cursor: 'pointer'
+                  }}
+                />
+                <div className="color-presets" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  {BRANCH_COLORS.presets.map(color => (
+                    <button
+                      key={color}
+                      className={`color-preset ${branchColor === color ? 'selected' : ''}`}
+                      style={{ 
+                        backgroundColor: color,
+                        width: '32px',
+                        height: '32px',
+                        border: branchColor === color ? '3px solid #000' : '2px solid #ccc',
+                        borderRadius: '8px',
+                        cursor: 'pointer',
+                        transition: 'border 0.2s'
+                      }}
+                      onClick={() => setBranchColor(color)}
+                      title={color}
+                    />
+                  ))}
+                </div>
+              </div>
+              <p style={{ fontSize: '0.8rem', color: '#666', marginTop: '8px' }}>
+                Current color: <span style={{ backgroundColor: branchColor, padding: '2px 8px', borderRadius: '4px', color: 'white' }}>{branchColor}</span>
+              </p>
+            </div>
             <div className="modal-buttons">
               <button 
                 onClick={handleCreateBranch} 

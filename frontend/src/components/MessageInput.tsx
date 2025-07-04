@@ -46,6 +46,10 @@ const MessageInput = memo(({
         onKeyPress={handleKeyPress}
         placeholder={`Type your message for branch "${currentBranch}"...`}
         disabled={loading}
+        autoComplete="off"
+        data-1p-ignore="true"
+        data-lpignore="true"
+        spellCheck="true"
       />
       <button 
         onClick={onSendMessage} 

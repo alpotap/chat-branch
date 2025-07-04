@@ -10,7 +10,7 @@ load_dotenv()
 # Get database URL from environment variable
 DATABASE_URL = os.getenv(
     "DATABASE_URL", 
-    "postgresql://chatbranch_user:chatbranch_password@localhost/chatbranch"
+    "postgresql://chatbranch_user:chatbranch_password@localhost/chatbranch"  # Use PostgreSQL by default
 )
 
 engine = create_engine(DATABASE_URL)

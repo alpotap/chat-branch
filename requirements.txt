@@ -9,6 +9,11 @@ python-dotenv==1.0.0
 litellm==1.17.7
 python-multipart==0.0.6
 
+# Authentication Dependencies
+PyJWT==2.8.0
+bcrypt==4.1.2
+passlib[bcrypt]==1.7.4
+
 # Database Dependencies
 psycopg2-binary==2.9.9
 

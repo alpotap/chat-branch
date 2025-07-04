@@ -22,6 +22,7 @@ interface ChatViewProps {
   onBranch: (messageId: string, branchName: string, color?: string) => void;
   onSelectMessage: (messageId: string) => void;
   onBranchSwitch: (messageId: string) => void;
+  onRegenerate: (messageId: string, type: 'branch' | 'place', branchName?: string) => void;
   onRenameBranch: (oldName: string, newName: string) => void;
   conversationTree: any;
 }
@@ -37,6 +38,7 @@ const ChatView = memo(({
   onBranch,
   onSelectMessage,
   onBranchSwitch,
+  onRegenerate,
   onRenameBranch,
   conversationTree
 }: ChatViewProps) => {
@@ -76,6 +78,9 @@ const ChatView = memo(({
                 onBlur={handleBranchRename}
                 autoFocus
                 className="branch-rename-input"
+                autoComplete="off"
+                data-1p-ignore="true"
+                data-lpignore="true"
               />
               <button onClick={handleBranchRename} className="rename-save-btn">✓</button>
               <button onClick={cancelBranchRename} className="rename-cancel-btn">✕</button>
@@ -93,9 +98,6 @@ const ChatView = memo(({
             </div>
           )}
         </div>
-        {selectedMessage && (
-          <span>Selected: {conversationTree?.messages[selectedMessage]?.content.substring(0, 30)}...</span>
-        )}
       </div>
       
       <div className="messages">
@@ -106,8 +108,10 @@ const ChatView = memo(({
             onBranch={onBranch}
             onSelectMessage={onSelectMessage}
             onBranchSwitch={onBranchSwitch}
+            onRegenerate={onRegenerate}
             isSelected={selectedMessage === message.id}
             depth={0}
+            conversationTree={conversationTree}
           />
         ))}
       </div>
