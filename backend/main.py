@@ -58,7 +58,7 @@ check_user_setup()
 
 app = FastAPI(title="ChatBranch API", version="1.0.0")
 
-# CORS
+# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],  # React dev server
@@ -67,13 +67,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Services
-conversation_service = ConversationService()
-llm_service = LLMService()
-auth_service = AuthService()
-
 # Security
 security = HTTPBearer()
+
+# Service instances
+auth_service = AuthService()
+conversation_service = ConversationService()
+llm_service = LLMService()
+
+# Health check endpoint
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {"status": "healthy", "service": "ChatBranch API", "version": "1.0.0"}
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
@@ -233,8 +239,14 @@ async def add_message(
     
     # Generate AI response if user message
     if message.role == "user":
-        # Get context for AI
-        context = conversation_service.get_message_context(db, db_message.id, current_user.id)
+        # Get conversation context for AI (entire branch history)
+        context = conversation_service.get_message_context(
+            db, 
+            conversation_id, 
+            message.branch_name, 
+            current_user.id
+            # Don't pass parent_message_id - we want full branch context
+        )
         
         # Generate AI response
         ai_response = await llm_service.generate_response(
@@ -307,7 +319,24 @@ async def get_message_context(
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversation not found")
     
-    context = conversation_service.get_message_context(db, message_id, current_user.id)
+    # Get the message to find its branch
+    message = db.query(Message).filter(
+        Message.id == message_id,
+        Message.user_id == current_user.id
+    ).first()
+    
+    if not message:
+        raise HTTPException(status_code=404, detail="Message not found")
+    
+    # Get context for the message's branch up to that message
+    context = conversation_service.get_message_context(
+        db, 
+        conversation_id, 
+        message.branch_name, 
+        current_user.id, 
+        message_id
+    )
+    
     return {"context": context}
 
 @app.get("/conversations/{conversation_id}/branches")

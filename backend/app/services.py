@@ -1,6 +1,9 @@
 from sqlalchemy.orm import Session
 from typing import List, Dict, Optional
 import uuid
+import os
+import random
+import asyncio
 from datetime import datetime
 
 from .models import Conversation, Message, Branch, User
@@ -102,40 +105,99 @@ class ConversationService:
         db.refresh(db_message)
         return db_message
     
-    def get_message_context(self, db: Session, message_id: str, user_id: str) -> List[Dict]:
-        """Get the context chain leading to a message (for LLM)"""
-        context = []
-        current_message = db.query(Message).filter(
-            Message.id == message_id,
-            Message.user_id == user_id
+    def get_message_context(self, db: Session, conversation_id: str, branch_name: str, user_id: str, parent_message_id: Optional[str] = None) -> List[Dict]:
+        """Get the conversation context for LLM - builds proper branch history"""
+        
+        # Get all messages in the conversation for this user
+        all_messages = db.query(Message).filter(
+            Message.conversation_id == conversation_id,
+            Message.user_id == user_id,
+            Message.is_active == True
+        ).order_by(Message.created_at).all()
+        
+        if not all_messages:
+            return []
+        
+        # Get all messages in the current branch (chronological order)
+        branch_messages = [msg for msg in all_messages if msg.branch_name == branch_name]
+        
+        if not branch_messages:
+            return []
+        
+        # Build the conversation thread for this branch
+        # Find the branch point (where this branch started)
+        branch_point_msg_id = None
+        branches = db.query(Branch).filter(
+            Branch.conversation_id == conversation_id,
+            Branch.name == branch_name
         ).first()
         
-        if not current_message:
-            return context
+        if branches and branches.created_from_message_id:
+            branch_point_msg_id = branches.created_from_message_id
         
-        # Traverse up the tree to build context
-        messages_chain = []
-        while current_message:
-            messages_chain.append(current_message)
-            if current_message.parent_id:
-                current_message = db.query(Message).filter(
-                    Message.id == current_message.parent_id,
-                    Message.user_id == user_id
-                ).first()
+        context_messages = []
+        
+        if branch_point_msg_id and branch_name != "main":
+            # For non-main branches: get all main branch messages up to branch point, then add branch messages
+            message_dict = {msg.id: msg for msg in all_messages}
+            
+            # Get all main branch messages
+            main_messages = [msg for msg in all_messages if msg.branch_name == "main"]
+            main_messages_sorted = sorted(main_messages, key=lambda x: x.created_at)
+            
+            # Find the branch point in the main messages
+            branch_point_index = -1
+            for i, msg in enumerate(main_messages_sorted):
+                if msg.id == branch_point_msg_id:
+                    branch_point_index = i
+                    break
+            
+            # Include all main messages up to and including the branch point
+            if branch_point_index >= 0:
+                context_messages = main_messages_sorted[:branch_point_index + 1]
             else:
-                break
+                context_messages = []
+            
+            # Then add all messages in the current branch (excluding the branch point message)
+            branch_only_messages = [msg for msg in branch_messages if msg.id != branch_point_msg_id]
+            context_messages.extend(sorted(branch_only_messages, key=lambda x: x.created_at))
+            
+        else:
+            # For main branch or when no branch point: use all messages in chronological order
+            context_messages = sorted(branch_messages, key=lambda x: x.created_at)
         
-        # Reverse to get chronological order
-        messages_chain.reverse()
-        
-        # Convert to LLM format
-        for msg in messages_chain:
-            context.append({
-                "role": msg.role,
+        # Convert to standard LLM message format
+        llm_context = []
+        for msg in context_messages:
+            llm_context.append({
+                "role": msg.role,  # "user" or "assistant" 
                 "content": msg.content
             })
         
-        return context
+        return llm_context
+    
+    def _build_conversation_thread(self, branch_messages: List[Message], start_message: Message) -> List[Message]:
+        """Build a chronological conversation thread starting from a message"""
+        thread = [start_message]
+        message_dict = {msg.id: msg for msg in branch_messages}
+        
+        # Find children of the start message and continue the thread
+        current_id = start_message.id
+        while True:
+            # Find the next message in the thread (child of current message)
+            next_message = None
+            for msg in branch_messages:
+                if msg.parent_id == current_id:
+                    next_message = msg
+                    break
+            
+            if next_message:
+                thread.append(next_message)
+                current_id = next_message.id
+            else:
+                break
+        
+        return thread
     
     def create_branch(self, db: Session, conversation_id: str, branch: BranchCreate, user_id: str) -> Branch:
         """Create a new branch from a message"""
@@ -352,6 +414,18 @@ except ImportError:
 load_dotenv()
 
 class LLMService:
+    """
+    LLM Service for ChatBranch - supports both dummy responses and real LLM calls
+    
+    Configuration:
+    - Set USE_DUMMY_RESPONSES=false in .env to enable real LLM calls
+    - Add OPENAI_API_KEY and/or ANTHROPIC_API_KEY for real LLM access
+    - Install optional dependencies: pip install litellm python-dotenv
+    
+    Message Format:
+    - Uses standard OpenAI format: [{"role": "user/assistant", "content": "..."}]
+    - Supports models: gpt-3.5-turbo, gpt-4, claude-3-sonnet-20240229, claude-3-haiku-20240307
+    """
     
     def __init__(self):
         # Configuration - set USE_DUMMY_RESPONSES=false in .env to use real LLMs
@@ -392,11 +466,41 @@ class LLMService:
     async def generate_response(self, context: List[Dict], model: str = "gpt-3.5-turbo") -> str:
         """Generate AI response - either dummy or real based on configuration"""
         
+        # Validate context format
+        if not self._validate_context(context):
+            raise ValueError("Invalid context format. Expected list of dicts with 'role' and 'content' keys.")
+        
+        # Debug: Log the context being sent to LLM
+        print(f"\n🤖 LLM Request for model '{model}':")
+        print(f"📝 Context length: {len(context)} messages")
+        for i, msg in enumerate(context):
+            role = msg.get('role', 'unknown')
+            content = msg.get('content', '')[:100] + ('...' if len(msg.get('content', '')) > 100 else '')
+            print(f"   {i+1}. {role}: {content}")
+        print("=" * 50)
+        
         # Use dummy responses by default or if real LLM is not configured
         if self.use_dummy_responses or not self._can_use_real_llm():
             return await self._generate_dummy_response(context, model)
         else:
             return await self._generate_real_response(context, model)
+    
+    def _validate_context(self, context: List[Dict]) -> bool:
+        """Validate that context is in proper LLM message format"""
+        if not isinstance(context, list):
+            return False
+        
+        for msg in context:
+            if not isinstance(msg, dict):
+                return False
+            if 'role' not in msg or 'content' not in msg:
+                return False
+            if msg['role'] not in ['user', 'assistant', 'system']:
+                return False
+            if not isinstance(msg['content'], str):
+                return False
+        
+        return True
     
     def _can_use_real_llm(self) -> bool:
         """Check if real LLM calls are possible"""

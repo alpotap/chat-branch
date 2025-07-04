@@ -59,8 +59,14 @@ npm start
 ## Quick API Test
 
 ```bash
-# Test with included script
+# First, ensure backend is running:
+# Terminal 1: cd backend && uvicorn main:app --reload --port 8001
+
+# Test basic API
 python test_api.py
+
+# Test LLM context building (NEW!)
+python test_context.py admin@example.com admin123
 
 # Or manually test conversation creation
 curl -X POST http://localhost:8001/conversations \
