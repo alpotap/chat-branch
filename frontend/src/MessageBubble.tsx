@@ -185,7 +185,7 @@ const MessageBubble = memo<MessageBubbleProps>(({
               🌿 Create Branch Here
             </button>
             <button onClick={() => { onSelectMessage(message.id); setShowContextMenu(false); }}>
-              📍 Navigate to Here
+              📍 Select Message
             </button>
             <hr style={{ margin: '4px 0', border: 'none', borderTop: '1px solid #ddd' }} />
             {canRegenerate() ? (

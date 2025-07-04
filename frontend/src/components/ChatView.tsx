@@ -24,6 +24,7 @@ interface ChatViewProps {
   onBranchSwitch: (messageId: string) => void;
   onRegenerate: (messageId: string, type: 'branch' | 'place', branchName?: string) => void;
   onRenameBranch: (oldName: string, newName: string) => void;
+  onDeselectMessage?: () => void;
   conversationTree: any;
 }
 
@@ -40,6 +41,7 @@ const ChatView = memo(({
   onBranchSwitch,
   onRegenerate,
   onRenameBranch,
+  onDeselectMessage,
   conversationTree
 }: ChatViewProps) => {
   const [isRenamingBranch, setIsRenamingBranch] = useState(false);
@@ -63,8 +65,15 @@ const ChatView = memo(({
     setNewBranchName('');
   };
 
+  const handleContainerClick = (e: React.MouseEvent) => {
+    // Only deselect if clicking on the container itself, not on child elements
+    if (e.target === e.currentTarget && onDeselectMessage) {
+      onDeselectMessage();
+    }
+  };
+
   return (
-    <div className="chat-container">
+    <div className="chat-container" onClick={handleContainerClick}>
       <div className="branch-info">
         <div className="branch-name-container">
           {isRenamingBranch ? (
@@ -100,7 +109,7 @@ const ChatView = memo(({
         </div>
       </div>
       
-      <div className="messages">
+      <div className="messages" onClick={handleContainerClick}>
         {paginatedMessages.map((message) => (
           <MessageBubble
             key={message.id}

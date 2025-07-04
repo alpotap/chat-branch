@@ -30,6 +30,8 @@ interface TreeViewProps {
   onMessageSelect: (messageId: string) => void;
   onSwitchToChatView: (branchName: string, messageId: string) => void;
   onCreateBranch: (messageId: string, branchName: string, color?: string) => void;
+  onRegenerate?: (messageId: string, type: 'branch' | 'place', branchName?: string) => void;
+  onDeselectMessage?: () => void;
   selectedMessage?: string;
   conversationTree?: any; // Add conversation tree for branch colors
 }
@@ -40,6 +42,8 @@ const TreeView: React.FC<TreeViewProps> = ({
   onMessageSelect, 
   onSwitchToChatView,
   onCreateBranch,
+  onRegenerate,
+  onDeselectMessage,
   selectedMessage,
   conversationTree
 }) => {
@@ -49,7 +53,9 @@ const TreeView: React.FC<TreeViewProps> = ({
   const [contextMenuPos, setContextMenuPos] = React.useState({ x: 0, y: 0 });
   const [contextMenuMessage, setContextMenuMessage] = React.useState<Message | null>(null);
   const [showBranchDialog, setShowBranchDialog] = React.useState(false);
+  const [showRegenBranchDialog, setShowRegenBranchDialog] = React.useState(false);
   const [branchName, setBranchName] = React.useState('');
+  const [regenBranchName, setRegenBranchName] = React.useState('');
   const [branchColor, setBranchColor] = React.useState('#3B82F6');
 
   // Function to get branch color from conversation tree
@@ -76,6 +82,65 @@ const TreeView: React.FC<TreeViewProps> = ({
     }
   };
 
+  const handleRegenInPlace = useCallback(() => {
+    if (contextMenuMessage && onRegenerate) {
+      onRegenerate(contextMenuMessage.id, 'place');
+      setShowContextMenu(false);
+      setContextMenuMessage(null);
+    }
+  }, [contextMenuMessage, onRegenerate]);
+
+  const handleRegenInBranch = useCallback(() => {
+    if (contextMenuMessage && regenBranchName.trim() && onRegenerate) {
+      onRegenerate(contextMenuMessage.id, 'branch', regenBranchName.trim());
+      setShowRegenBranchDialog(false);
+      setRegenBranchName('');
+      setShowContextMenu(false);
+      setContextMenuMessage(null);
+    }
+  }, [contextMenuMessage, regenBranchName, onRegenerate]);
+
+  // Helper functions for regeneration logic
+  const canRegenerate = useCallback(() => {
+    if (!contextMenuMessage || contextMenuMessage.role !== 'assistant') return false;
+    const children = contextMenuMessage.children || [];
+    return children.length === 0;
+  }, [contextMenuMessage]);
+
+  const isResponseToFirstMessage = useCallback(() => {
+    if (!contextMenuMessage) return false;
+    // Check if this is a direct response to the first message (no parent or parent is first)
+    // This is a simplified check - you might need to adjust based on your data structure
+    return false; // For now, allow both options
+  }, [contextMenuMessage]);
+
+  // Calculate path to root for selected message
+  const pathToRoot = useMemo(() => {
+    if (!selectedMessage || !messages) return new Set<string>();
+    
+    const path = new Set<string>();
+    const visited = new Set<string>();
+    
+    // Build parent map for efficient lookup
+    const parentMap: { [childId: string]: string } = {};
+    Object.values(messages).forEach(message => {
+      const children = message.children || [];
+      children.forEach(child => {
+        parentMap[child.id] = message.id;
+      });
+    });
+    
+    // Traverse up from selected message to root
+    let currentId: string | undefined = selectedMessage;
+    while (currentId && !visited.has(currentId)) {
+      visited.add(currentId);
+      path.add(currentId);
+      currentId = parentMap[currentId];
+    }
+    
+    return path;
+  }, [selectedMessage, messages]);
+
   const { flowNodes, flowEdges } = useMemo(() => {
     const nodes: Node[] = [];
     const edges: Edge[] = [];
@@ -101,7 +166,7 @@ const TreeView: React.FC<TreeViewProps> = ({
         // Slightly larger distance between AI response and next user query
         let levelHeight;
         if (message.role === 'user' && childMessage?.role === 'assistant') {
-          levelHeight = 140; // Normal spacing: user -> AI
+          levelHeight = 120; // Decreased from 140: Normal spacing: user -> AI
         } else if (message.role === 'assistant' && childMessage?.role === 'user') {
           levelHeight = 180; // Slightly larger spacing: AI -> next user
         } else {
@@ -137,6 +202,19 @@ const TreeView: React.FC<TreeViewProps> = ({
     // Create nodes and edges
     Object.values(messages).forEach(message => {
       const pos = positions[message.id] || { x: 0, y: 0 };
+      const isSelected = selectedMessage === message.id;
+      const isInPath = pathToRoot.has(message.id);
+      const isRoot = rootMessages.includes(message.id);
+      
+      let nodeClasses = `tree-node ${message.role}`;
+      if (isSelected) {
+        nodeClasses += ' selected';
+      } else if (isInPath) {
+        nodeClasses += ' in-path';
+        if (isRoot) {
+          nodeClasses += ' root-in-path';
+        }
+      }
       
       nodes.push({
         id: message.id,
@@ -145,7 +223,7 @@ const TreeView: React.FC<TreeViewProps> = ({
         data: {
           label: (
             <div 
-              className={`tree-node ${message.role} ${selectedMessage === message.id ? 'selected' : ''}`}
+              className={nodeClasses}
               onClick={() => onMessageSelect(message.id)}
               onDoubleClick={() => onSwitchToChatView(message.branch_name, message.id)}
               onContextMenu={(e) => message.role === 'assistant' ? handleRightClick(e, message) : undefined}
@@ -182,27 +260,55 @@ const TreeView: React.FC<TreeViewProps> = ({
       // Create edges to children
       const children = message.children || [];
       children.forEach(child => {
+        // Determine edge highlighting type
+        const isDirectConnection = selectedMessage === child.id || selectedMessage === message.id;
+        const isInPath = pathToRoot.has(message.id) && pathToRoot.has(child.id);
+        
+        // Different visual styles for different types of highlighting
+        let edgeStyle: any = {
+          stroke: getBranchColor(child.branch_name),
+          strokeWidth: 2
+        };
+        
+        let animated = false;
+        
+        if (isDirectConnection) {
+          // Direct connection: bright highlighting with animation
+          edgeStyle.strokeWidth = 4;
+          edgeStyle.stroke = '#667eea';
+          animated = true;
+        } else if (isInPath) {
+          // Path to root: subtle highlighting
+          edgeStyle.strokeWidth = 3;
+          edgeStyle.strokeDasharray = '5,5';
+          edgeStyle.opacity = 0.8;
+          animated = true;
+        }
+        
         edges.push({
           id: `${message.id}-${child.id}`,
           source: message.id,
           target: child.id,
           type: 'smoothstep',
-          style: { 
-            stroke: getBranchColor(child.branch_name),
-            strokeWidth: 2 
-          },
-          animated: selectedMessage === child.id || selectedMessage === message.id,
+          style: edgeStyle,
+          animated: animated,
         });
       });
     });
 
     return { flowNodes: nodes, flowEdges: edges };
-  }, [messages, rootMessages, selectedMessage, onMessageSelect, onSwitchToChatView]);
+  }, [messages, rootMessages, selectedMessage, onMessageSelect, onSwitchToChatView, pathToRoot]);
 
   const onConnect = useCallback(
     (params: any) => setEdges((eds) => addEdge(params, eds)),
     [setEdges]
   );
+
+  const onPaneClick = useCallback(() => {
+    if (onDeselectMessage) {
+      onDeselectMessage();
+    }
+  }, [onDeselectMessage]);
 
   return (
     <div className="tree-view">
@@ -212,6 +318,7 @@ const TreeView: React.FC<TreeViewProps> = ({
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        onPaneClick={onPaneClick}
         connectionLineType={ConnectionLineType.SmoothStep}
         fitView
         fitViewOptions={{ padding: 50 }}
@@ -268,6 +375,90 @@ const TreeView: React.FC<TreeViewProps> = ({
             >
               🌿 Create Branch Here
             </button>
+            <button 
+              onClick={() => { 
+                if (contextMenuMessage) {
+                  onMessageSelect(contextMenuMessage.id); 
+                }
+                setShowContextMenu(false); 
+              }}
+              style={{
+                width: '100%',
+                padding: '8px 16px',
+                border: 'none',
+                background: 'none',
+                textAlign: 'left',
+                cursor: 'pointer'
+              }}
+            >
+              📍 Select Message
+            </button>
+            {onRegenerate && (
+              <>
+                <hr style={{ margin: '4px 0', border: 'none', borderTop: '1px solid #ddd' }} />
+                {canRegenerate() ? (
+                  <>
+                    {!isResponseToFirstMessage() && (
+                      <button 
+                        onClick={() => {
+                          setShowContextMenu(false);
+                          setShowRegenBranchDialog(true);
+                          setRegenBranchName(`Branch-${Date.now()}`);
+                        }}
+                        style={{
+                          width: '100%',
+                          padding: '8px 16px',
+                          border: 'none',
+                          background: 'none',
+                          textAlign: 'left',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        🔄 Re-generate in New Branch
+                      </button>
+                    )}
+                    <button 
+                      onClick={handleRegenInPlace}
+                      style={{
+                        width: '100%',
+                        padding: '8px 16px',
+                        border: 'none',
+                        background: 'none',
+                        textAlign: 'left',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px'
+                      }}
+                      title="Warning: This will replace the current response"
+                    >
+                      ⚠️ Re-generate in Place
+                      <span style={{ fontSize: '12px', color: '#666' }}>ⓘ</span>
+                    </button>
+                  </>
+                ) : (
+                  <button 
+                    disabled
+                    style={{ 
+                      width: '100%',
+                      padding: '8px 16px',
+                      border: 'none',
+                      background: 'none',
+                      textAlign: 'left',
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      gap: '4px',
+                      opacity: 0.5,
+                      cursor: 'not-allowed'
+                    }}
+                    title="Cannot regenerate: This message has follow-up responses or branches"
+                  >
+                    🚫 Cannot Regenerate
+                    <span style={{ fontSize: '12px', color: '#666' }}>ⓘ</span>
+                  </button>
+                )}
+              </>
+            )}
           </div>
         </>
       )}
@@ -365,6 +556,42 @@ const TreeView: React.FC<TreeViewProps> = ({
                 setShowBranchDialog(false);
                 setBranchName('');
                 setContextMenuMessage(null);
+              }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Regeneration Branch Dialog */}
+      {showRegenBranchDialog && contextMenuMessage && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <h3>Re-generate in New Branch</h3>
+            <p>Re-generating: "{contextMenuMessage.content.substring(0, 50)}..."</p>
+            <input
+              type="text"
+              placeholder="Enter branch name for regeneration"
+              value={regenBranchName}
+              onChange={(e) => setRegenBranchName(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && handleRegenInBranch()}
+              autoFocus
+              autoComplete="off"
+              data-1p-ignore="true"
+              data-lpignore="true"
+            />
+            <div className="modal-buttons">
+              <button 
+                onClick={handleRegenInBranch} 
+                disabled={!regenBranchName.trim()}
+                style={{ marginRight: '8px' }}
+              >
+                Re-generate
+              </button>
+              <button onClick={() => {
+                setShowRegenBranchDialog(false);
+                setRegenBranchName('');
               }}>
                 Cancel
               </button>

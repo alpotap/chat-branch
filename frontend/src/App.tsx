@@ -54,6 +54,7 @@ const ConversationApp: React.FC = () => {
     canRedo: false
   });
   const [isNavigating, setIsNavigating] = useState(false);
+  const [intentionallyDeselected, setIntentionallyDeselected] = useState(false);
   
   // Error modal state
   const [showErrorModal, setShowErrorModal] = useState(false);
@@ -209,6 +210,7 @@ const ConversationApp: React.FC = () => {
       setCurrentBranch(DEFAULT_BRANCH); // Always start with main branch
       setViewMode(savedViewMode);
       setSelectedMessage(null);
+      setIntentionallyDeselected(false); // Reset intentional deselection when switching conversations
       setNewMessage('');
       setShowAllMessages(false);
       setUndoRedoState({
@@ -236,14 +238,14 @@ const ConversationApp: React.FC = () => {
 
   // Auto-select last message when conversation/branch changes (but not during navigation)
   useEffect(() => {
-    if (!isNavigating && allBranchMessages.length > 0 && conversationTree) {
+    if (!isNavigating && !intentionallyDeselected && allBranchMessages.length > 0 && conversationTree) {
       const lastMessage = allBranchMessages[allBranchMessages.length - 1];
       // Only auto-select if no message is currently selected or if the selected message is not in current branch
       if (!selectedMessage || !allBranchMessages.some(msg => msg.id === selectedMessage)) {
         setSelectedMessage(lastMessage.id);
       }
     }
-  }, [currentBranch, allBranchMessages, setSelectedMessage, isNavigating, conversationTree, selectedMessage]);
+  }, [currentBranch, allBranchMessages, setSelectedMessage, isNavigating, conversationTree, selectedMessage, intentionallyDeselected]);
 
   // Helper function to show error modal instead of alert
   const showError = useCallback((message: string) => {
@@ -389,7 +391,13 @@ const ConversationApp: React.FC = () => {
     }
     // Always select the message regardless of view mode
     setSelectedMessage(messageId);
+    setIntentionallyDeselected(false); // Reset intentional deselection flag
   }, [setSelectedMessage, conversationTree, currentBranch, isNavigating, saveToHistory, viewMode, setCurrentBranch]);
+
+  const handleDeselectMessage = useCallback(() => {
+    setSelectedMessage(null);
+    setIntentionallyDeselected(true);
+  }, [setSelectedMessage]);
 
   const handleBranchSwitch = useCallback((messageId: string) => {
     if (!isNavigating) {
@@ -406,6 +414,7 @@ const ConversationApp: React.FC = () => {
     }
     
     setSelectedMessage(messageId);
+    setIntentionallyDeselected(false); // Reset intentional deselection when switching branches
     if (conversationTree) {
       const message = conversationTree.messages[messageId];
       if (message) {
@@ -422,6 +431,7 @@ const ConversationApp: React.FC = () => {
     
     setCurrentBranch(branchName);
     setSelectedMessage(messageId);
+    setIntentionallyDeselected(false); // Reset intentional deselection when switching to chat view
     setViewMode('chat');
   }, [setSelectedMessage, saveToHistory, isNavigating]);
 
@@ -562,6 +572,8 @@ const ConversationApp: React.FC = () => {
                     onMessageSelect={handleMessageSelect}
                     onSwitchToChatView={handleSwitchToChatView}
                     onCreateBranch={handleCreateBranch}
+                    onRegenerate={handleRegenerate}
+                    onDeselectMessage={handleDeselectMessage}
                     selectedMessage={selectedMessage || undefined}
                     conversationTree={conversationTree}
                   />
@@ -584,6 +596,7 @@ const ConversationApp: React.FC = () => {
                   onBranchSwitch={handleBranchSwitch}
                   onRegenerate={handleRegenerate}
                   onRenameBranch={handleRenameBranch}
+                  onDeselectMessage={handleDeselectMessage}
                   conversationTree={conversationTree}
                 />
               )}
