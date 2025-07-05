@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: chatbranch-postgres
+    environment:
+      POSTGRES_DB: chatbranch
+      POSTGRES_USER: chatbranch
+      POSTGRES_PASSWORD: chatbranch_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"  # Expose for external access/debugging
+    networks:
+      - chatbranch_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chatbranch -d chatbranch"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # FastAPI Backend
+  backend:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: chatbranch-backend
+    env_file:
+      - ./backend/.env
+    environment:
+      - DATABASE_URL=postgresql://chatbranch:chatbranch_password@postgres:5432/chatbranch
+    volumes:
+      - ./backend:/app  # Mount for development (live code changes)
+      - ./scripts:/app/scripts  # Mount scripts for easy access
+    ports:
+      - "8001:8001"  # Expose for debugging
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - chatbranch_network
+    restart: unless-stopped
+
+  # React Frontend with Nginx
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: chatbranch-frontend
+    environment:
+      - REACT_APP_API_BASE=/api  # Use nginx proxy for Docker
+    ports:
+      - "3000:80"  # Main application port
+    depends_on:
+      - backend
+    networks:
+      - chatbranch_network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  chatbranch_network:
+    driver: bridge

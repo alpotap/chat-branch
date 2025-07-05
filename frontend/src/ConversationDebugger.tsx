@@ -19,7 +19,7 @@ const ConversationDebugger: React.FC = () => {
   const [modalMessage, setModalMessage] = useState('');
   const [modalType, setModalType] = useState<'error' | 'success'>('error');
 
-  const API_BASE = 'http://localhost:8001';
+  const API_BASE = process.env.REACT_APP_API_BASE || 'http://localhost:8001';
 
   const showMessage = (message: string, type: 'error' | 'success' = 'error') => {
     setModalMessage(message);
