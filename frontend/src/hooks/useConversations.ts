@@ -47,8 +47,12 @@ export const useConversations = () => {
       setCurrentConversation(tree.conversation);
       setConversationTree(tree);
       return tree;
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error loading conversation:', error);
+      if (error.response?.status === 404) {
+        // Throw specific error for 404 so UI can handle it
+        throw new Error('CONVERSATION_NOT_FOUND');
+      }
       return null;
     }
   }, []);

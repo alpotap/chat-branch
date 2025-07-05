@@ -63,6 +63,9 @@ const ConversationApp: React.FC = () => {
   // Error modal state
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  
+  // Conversation not found modal state
+  const [showConversationNotFoundModal, setShowConversationNotFoundModal] = useState(false);
 
   const {
     conversations,
@@ -226,7 +229,13 @@ const ConversationApp: React.FC = () => {
       });
       
       // Load the conversation data
-      loadConversation(conversationId);
+      loadConversation(conversationId).catch((error) => {
+        if (error.message === 'CONVERSATION_NOT_FOUND') {
+          setShowConversationNotFoundModal(true);
+        } else {
+          console.error('Unexpected error loading conversation:', error);
+        }
+      });
     }
   }, [conversationId, loadConversation, setSelectedMessage, setNewMessage, setShowAllMessages]);
 
@@ -312,16 +321,18 @@ const ConversationApp: React.FC = () => {
     const success = await deleteConversation(targetConversation.id);
     if (success) {
       if (targetConversation.id === currentConversation?.id) {
+        // If deleting current conversation, navigate to home page
         setSelectedMessage(null);
         setCurrentBranch('main');
         setShowAllMessages(false);
         localStorage.removeItem('chatbranch-state');
+        navigate('/'); // Navigate to home page
       }
       console.log('✅ Conversation deleted successfully');
     } else {
       showError('Failed to delete conversation. Please try again.');
     }
-  }, [currentConversation, conversations, deleteConversation, setSelectedMessage, setShowAllMessages, showError]);
+  }, [currentConversation, conversations, deleteConversation, setSelectedMessage, setShowAllMessages, showError, navigate]);
 
   const handleSendMessage = useCallback(async () => {
     if (!currentConversation || !newMessage.trim()) return;
@@ -386,7 +397,7 @@ const ConversationApp: React.FC = () => {
       setLoading(false);
     }
   }, [currentConversation, newMessage, allBranchMessages, currentBranch, selectedModel, sendMessage, setSelectedMessage, setIntentionallyDeselected, setNewMessage, loadConversation, setLoading]);
-    setNewMessage('');
+
   const handleCreateBranch = useCallback(async (messageId: string, branchName: string, color?: string) => {
     if (!currentConversation) return;
 
@@ -704,6 +715,37 @@ const ConversationApp: React.FC = () => {
                 }}
               >
                 OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Conversation Not Found Modal */}
+      {showConversationNotFoundModal && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <h3>Conversation Not Found</h3>
+            <p>This conversation no longer exists. It may have been deleted.</p>
+            <div style={{ textAlign: 'center', marginTop: '20px' }}>
+              <button 
+                onClick={() => {
+                  setShowConversationNotFoundModal(false);
+                  navigate('/');
+                }}
+                style={{
+                  backgroundColor: '#667eea',
+                  color: 'white',
+                  border: 'none',
+                  padding: '12px 32px',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: '16px',
+                  fontWeight: '500',
+                  minWidth: '160px'
+                }}
+              >
+                Go to Home
               </button>
             </div>
           </div>
