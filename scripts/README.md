@@ -1,6 +1,6 @@
-# 👥 ChatBranch User Management Scripts
+# 👥 ChatBranch User Management & Testing Scripts
 
-This directory contains utility scripts for managing ChatBranch users.
+This directory contains utility scripts for managing ChatBranch users and testing functionality.
 
 ## 📋 Available Scripts
 
@@ -29,6 +29,36 @@ python remove_user.py --list
 
 # Force removal without confirmation
 python remove_user.py test@123 --force
+```
+
+### 3. **test_context.py** - Test LLM Context Building
+```bash
+# Test conversation branching and context building
+python test_context.py admin@example.com admin123
+
+# Prerequisites: Backend must be running first
+cd ..\backend
+uvicorn main:app --reload --port 8001
+# Then in another terminal:
+cd ..\scripts
+python test_context.py admin@example.com admin123
+```
+
+### 4. **fix_main_branches.py** - Repair Main Branch Issues
+```bash
+# List conversations with main branch problems
+python fix_main_branches.py --list
+
+# Preview fixes without making changes
+python fix_main_branches.py --fix-all --dry-run
+
+# Fix all problematic conversations
+python fix_main_branches.py --fix-all
+
+# Fix a specific conversation
+python fix_main_branches.py --fix-conv <conversation-id>
+
+# IMPORTANT: Stop the backend before running fixes!
 ```
 
 ## 🚀 Usage Instructions

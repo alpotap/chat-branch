@@ -18,24 +18,28 @@ export const useMessages = () => {
   ) => {
     if (!message.trim()) return false;
 
-    setLoading(true);
+    console.log(`🔍 DEBUG: sendMessage called with:`, {
+      conversationId,
+      currentBranch,
+      parentMessageId,
+      finalParentId: parentMessageId || null
+    });
+
     try {
       await axios.post(`${API_BASE}/conversations/${conversationId}/messages`, {
         content: message,
         role: 'user',
         llm_model: selectedModel,
         branch_name: currentBranch,
-        parent_id: parentMessageId || selectedMessage
+        parent_id: parentMessageId || null
       });
       setNewMessage('');
       return true;
     } catch (error) {
       console.error('Error sending message:', error);
       return false;
-    } finally {
-      setLoading(false);
     }
-  }, [selectedMessage]);
+  }, []);
 
   const createBranch = useCallback(async (
     conversationId: string,
@@ -50,9 +54,11 @@ export const useMessages = () => {
         color: color || getRandomBranchColor()
       });
       return true;
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error creating branch:', error);
-      return false;
+      // Throw the error with details so the UI can handle it properly
+      const errorMessage = error.response?.data?.detail || 'Failed to create branch';
+      throw new Error(errorMessage);
     }
   }, []);
 
@@ -62,6 +68,7 @@ export const useMessages = () => {
     newMessage,
     setNewMessage,
     loading,
+    setLoading,
     sendMessage,
     createBranch
   };
