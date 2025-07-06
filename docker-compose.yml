@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # PostgreSQL Database
   postgres:
@@ -33,7 +31,6 @@ services:
       - DATABASE_URL=postgresql://chatbranch:chatbranch_password@postgres:5432/chatbranch
     volumes:
       - ./backend:/app  # Mount for development (live code changes)
-      - ./scripts:/app/scripts  # Mount scripts for easy access
     ports:
       - "8001:8001"  # Expose for debugging
     depends_on:

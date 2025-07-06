@@ -20,8 +20,8 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
-# Add the backend directory to the path so we can import our modules
-backend_dir = Path(__file__).parent.parent / "backend"
+# Add the parent directory (backend) to the path so we can import our modules
+backend_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_dir))
 
 from app.database import get_db, engine

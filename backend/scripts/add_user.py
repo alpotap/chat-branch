@@ -19,8 +19,8 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
-# Add the backend directory to the path so we can import our modules
-backend_dir = Path(__file__).parent.parent / "backend"
+# Add the parent directory (backend) to the path so we can import our modules
+backend_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_dir))
 
 from app.database import get_db, engine
@@ -50,7 +50,7 @@ def create_user(email: str, password: str, is_admin: bool = False, name: Optiona
         name: User's display name (optional, defaults to email)
     
     Returns:
-        True if user was created successfully, False otherwise
+        True if user was created successfully or already exists, False otherwise
     """
     db = None
     try:
@@ -69,8 +69,9 @@ def create_user(email: str, password: str, is_admin: bool = False, name: Optiona
         # Check if user already exists
         existing_user = db.query(User).filter(User.email == email).first()
         if existing_user:
-            print(f"❌ User with email {email} already exists")
-            return False
+            admin_text = " (Admin)" if existing_user.role == "admin" else ""
+            print(f"ℹ️  User {email} already exists{admin_text} - skipping creation")
+            return True  # Treat existing user as success
         
         # Hash the password using get_password_hash function
         hashed_password = get_password_hash(password)
@@ -129,7 +130,8 @@ def main():
 Examples:
   python add_user.py john@example.com mypassword123
   python add_user.py admin@company.com supersecret --admin
-  python add_user.py "Jane Doe" jane@example.com mypassword123 --name "Jane Doe"
+  python add_user.py jane@example.com mypassword123 --name "Jane Doe"
+  python add_user.py admin@123 admin123 --admin --force  # Skip confirmation (Docker/automation)
         """
     )
     
@@ -137,6 +139,7 @@ Examples:
     parser.add_argument("password", help="User's password (minimum 6 characters)")
     parser.add_argument("--admin", action="store_true", help="Make this user an administrator")
     parser.add_argument("--name", help="User's display name (defaults to part before @ in email)")
+    parser.add_argument("--force", action="store_true", help="Skip confirmation prompt (useful for Docker/automated deployment)")
     
     args = parser.parse_args()
     
@@ -147,11 +150,14 @@ Examples:
     print(f"🔐 Admin: {'Yes' if args.admin else 'No'}")
     print("=" * 40)
     
-    # Confirm before creating
-    response = input("Create this user? (y/N): ").strip().lower()
-    if response not in ['y', 'yes']:
-        print("❌ User creation cancelled")
-        return
+    # Confirm before creating (unless --force is used)
+    if not args.force:
+        response = input("Create this user? (y/N): ").strip().lower()
+        if response not in ['y', 'yes']:
+            print("❌ User creation cancelled")
+            return
+    else:
+        print("🚀 Force mode enabled - creating user without confirmation...")
     
     # Create the user
     success = create_user(
