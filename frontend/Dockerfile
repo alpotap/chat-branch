@@ -12,7 +12,10 @@ RUN npm ci
 # Copy source code
 COPY . .
 
-# Build the application
+ARG REACT_APP_API_BASE=/api
+ENV REACT_APP_API_BASE=$REACT_APP_API_BASE
+
+# Build the React app
 RUN npm run build
 
 # Stage 2: Serve with Nginx

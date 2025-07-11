@@ -24,7 +24,7 @@ interface ConversationTree {
   root_messages: string[];
 }
 
-const API_BASE = process.env.REACT_APP_API_BASE || 'http://localhost:8001';
+const API_BASE = process.env.REACT_APP_API_BASE;
 
 export const useConversations = () => {
   const [conversations, setConversations] = useState<Conversation[]>([]);

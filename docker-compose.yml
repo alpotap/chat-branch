@@ -29,10 +29,8 @@ services:
       - ./backend/.env
     environment:
       - DATABASE_URL=postgresql://chatbranch:chatbranch_password@postgres:5432/chatbranch
-    volumes:
-      - ./backend:/app  # Mount for development (live code changes)
-    ports:
-      - "8001:8001"  # Expose for debugging
+    # volumes:
+    #   - ./backend:/app  # Mount for development (live code changes)
     depends_on:
       postgres:
         condition: service_healthy
@@ -49,7 +47,7 @@ services:
     environment:
       - REACT_APP_API_BASE=/api  # Use nginx proxy for Docker
     ports:
-      - "3000:80"  # Main application port
+      - "3001:80"
     depends_on:
       - backend
     networks:

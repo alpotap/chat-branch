@@ -40,9 +40,9 @@ CMD ["sh", "-c", "\
     echo '' && \
     echo '🎉 CHATBRANCH IS READY!' && \
     echo '========================================' && \
-    echo '🌐 Frontend (Main App): http://localhost:3000' && \
-    echo '🔧 Backend API:        http://localhost:8001' && \
-    echo '🗄️  PostgreSQL:         localhost:5432' && \
+    echo '🌐 Frontend (Main App): http://localhost:3001' && \
+    echo '🔧 API (via nginx proxy): http://localhost:3001/api' && \
+    echo '🗄️  PostgreSQL:         localhost:5432 (internal only)' && \
     echo '========================================' && \
     echo '👥 Default Users:' && \
     echo '   Admin: admin@123 / admin123' && \

@@ -15,6 +15,8 @@ import { useMessages } from './hooks/useMessages';
 import { useBranchMessages } from './hooks/useBranchMessages';
 import './App.css';
 
+const API_BASE = process.env.REACT_APP_API_BASE || '/api';
+
 // Simple undo/redo state for within-conversation navigation
 interface ViewState {
   branch: string;
@@ -422,7 +424,7 @@ const ConversationApp: React.FC = () => {
     try {
       if (type === 'branch') {
         // Regenerate in new branch
-        const response = await axios.post(`http://localhost:8001/conversations/${currentConversation.id}/messages/${messageId}/regenerate-branch`, {
+        const response = await axios.post(`${API_BASE}/conversations/${currentConversation.id}/messages/${messageId}/regenerate-branch`, {
           branch_name: branchName || 'regen-main'
         });
 
@@ -440,7 +442,7 @@ const ConversationApp: React.FC = () => {
         
       } else {
         // Regenerate in place
-        const response = await axios.post(`http://localhost:8001/conversations/${currentConversation.id}/messages/${messageId}/regenerate-place`);
+        const response = await axios.post(`${API_BASE}/conversations/${currentConversation.id}/messages/${messageId}/regenerate-place`);
 
         console.log('✅ In-place regeneration successful:', response.data);
         
@@ -596,7 +598,7 @@ const ConversationApp: React.FC = () => {
     
     try {
       console.log(`🎨 [DEBUG] Updating branch color: ${branchName} -> ${color}`);
-      const response = await axios.patch(`http://localhost:8001/conversations/${currentConversation.id}/branches/${branchName}/color`, {
+      const response = await axios.patch(`${API_BASE}/conversations/${currentConversation.id}/branches/${branchName}/color`, {
         color: color
       });
       console.log(`✅ [DEBUG] Branch color update response:`, response.data);
