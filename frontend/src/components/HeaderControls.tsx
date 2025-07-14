@@ -255,6 +255,8 @@ const HeaderControls: React.FC<HeaderControlsProps> = ({
           <option value="gpt-4">GPT-4</option>
           <option value="claude-3-sonnet-20240229">Claude 3 Sonnet</option>
           <option value="claude-3-haiku-20240307">Claude 3 Haiku</option>
+          <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+          <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
         </select>
         
         {/* User info and logout */}

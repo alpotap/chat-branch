@@ -5,6 +5,21 @@ import os
 import random
 import asyncio
 from datetime import datetime
+import random
+import asyncio
+import os
+from dotenv import load_dotenv
+import aiohttp
+
+# Try to import litellm, but don't fail if it's not available
+try:
+    import litellm
+    LITELLM_AVAILABLE = True
+except ImportError:
+    LITELLM_AVAILABLE = False
+    print("⚠️  LiteLLM not available, using dummy responses only")
+
+load_dotenv()
 
 from .models import Conversation, Message, Branch, User
 from .schemas import ConversationCreate, MessageCreate, BranchCreate, ConversationTree, MessageNode, ConversationResponse, BranchResponse, UserResponse, Token
@@ -691,23 +706,6 @@ class ConversationService:
             "diagnostics_after_fix": self.validate_conversation_integrity(db, conversation_id)
         }
 
-
-import random
-import asyncio
-import os
-from typing import List, Dict
-from dotenv import load_dotenv
-
-# Try to import litellm, but don't fail if it's not available
-try:
-    import litellm
-    LITELLM_AVAILABLE = True
-except ImportError:
-    LITELLM_AVAILABLE = False
-    print("⚠️  LiteLLM not available, using dummy responses only")
-
-load_dotenv()
-
 class LLMService:
     """
     LLM Service for ChatBranch - supports both dummy responses and real LLM calls
@@ -759,26 +757,43 @@ class LLMService:
         ]
     
     async def generate_response(self, context: List[Dict], model: str = "gpt-3.5-turbo") -> str:
-        """Generate AI response - either dummy or real based on configuration"""
-        
-        # Validate context format
-        if not self._validate_context(context):
-            raise ValueError("Invalid context format. Expected list of dicts with 'role' and 'content' keys.")
-        
-        # Debug: Log the context being sent to LLM
-        print(f"\n🤖 LLM Request for model '{model}':")
-        print(f"📝 Context length: {len(context)} messages")
-        for i, msg in enumerate(context):
-            role = msg.get('role', 'unknown')
-            content = msg.get('content', '')[:100] + ('...' if len(msg.get('content', '')) > 100 else '')
-            print(f"   {i+1}. {role}: {content}")
-        print("=" * 50)
-        
-        # Use dummy responses by default or if real LLM is not configured
-        if self.use_dummy_responses or not self._can_use_real_llm():
+        """
+        Generate a response using LiteLLM for any supported model (OpenAI, Gemini, Anthropic, etc).
+        Falls back to dummy response if USE_DUMMY_RESPONSES is true or on error.
+        """
+        use_dummy = os.getenv("USE_DUMMY_RESPONSES", "true").lower() == "true"
+        if use_dummy:
             return await self._generate_dummy_response(context, model)
-        else:
-            return await self._generate_real_response(context, model)
+        if not LITELLM_AVAILABLE:
+            return await self._generate_dummy_response(context, model, error_fallback=True)
+        try:
+            # Map frontend model names to LiteLLM model names
+            model_map = {
+                "gpt-3.5-turbo": "gpt-3.5-turbo",
+                "gpt-4": "gpt-4",
+                "claude-3-sonnet-20240229": "claude-3-sonnet-20240229",
+                "claude-3-haiku-20240307": "claude-3-haiku-20240307",
+                "gemini-2.5-pro": "gemini/gemini-2.5-pro",
+                "gemini-2.5-flash": "gemini/gemini-2.5-flash"
+            }
+            mapped_model = model_map.get(model, model)
+            # Ensure context is in OpenAI format: [{"role": "user"|"assistant", "content": ...}]
+            formatted_context = []
+            for msg in context:
+                role = msg.get("role")
+                if role not in ("user", "assistant"):
+                    role = "user" if role == "model" else "assistant"
+                formatted_context.append({"role": role, "content": msg["content"]})
+            response = await litellm.acompletion(
+                model=mapped_model,
+                messages=formatted_context,
+                temperature=0.7,
+                max_tokens=1000
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            print(f"❌ Error with real LLM call: {e}")
+            return await self._generate_dummy_response(context, model, error_fallback=True)
     
     def _validate_context(self, context: List[Dict]) -> bool:
         """Validate that context is in proper LLM message format"""
