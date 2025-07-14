@@ -13,6 +13,7 @@ import ReactFlow, {
 } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { getBranchColorFromTree, BRANCH_COLORS, getRandomBranchColor } from './utils/branchColors';
+import { generateUniqueBranchName } from './utils/branchNaming';
 
 interface Message {
   id: string;
@@ -91,14 +92,15 @@ const TreeView: React.FC<TreeViewProps> = ({
   }, [contextMenuMessage, onRegenerate]);
 
   const handleRegenInBranch = useCallback(() => {
-    if (contextMenuMessage && regenBranchName.trim() && onRegenerate) {
-      onRegenerate(contextMenuMessage.id, 'branch', regenBranchName.trim());
+    if (contextMenuMessage && onRegenerate) {
+      const newBranchName = getDefaultBranchName('regen', contextMenuMessage.branch_name, conversationTree?.branches || []);
+      onRegenerate(contextMenuMessage.id, 'branch', newBranchName);
       setShowRegenBranchDialog(false);
       setRegenBranchName('');
       setShowContextMenu(false);
       setContextMenuMessage(null);
     }
-  }, [contextMenuMessage, regenBranchName, onRegenerate]);
+  }, [contextMenuMessage, onRegenerate, conversationTree]);
 
   // Helper functions for regeneration logic
   const canRegenerate = useCallback(() => {
@@ -310,6 +312,11 @@ const TreeView: React.FC<TreeViewProps> = ({
     }
   }, [onDeselectMessage]);
 
+  function getDefaultBranchName(type: 'branch' | 'regen', parentBranchName: string, branches: { name: string }[]) {
+    const suffix = type === 'branch' ? 'branch' : 'regen';
+    return generateUniqueBranchName(`${parentBranchName}-${suffix}`, branches);
+  }
+
   return (
     <div className="tree-view">
       <ReactFlow
@@ -361,8 +368,9 @@ const TreeView: React.FC<TreeViewProps> = ({
               onClick={() => {
                 setShowContextMenu(false);
                 setShowBranchDialog(true);
-                setBranchName(`Branch-${Date.now()}`);
-                setBranchColor(getRandomBranchColor()); // Set random color as default
+                const parentBranchName = contextMenuMessage?.branch_name || 'main';
+                setBranchName(getDefaultBranchName('branch', parentBranchName, conversationTree?.branches || []));
+                setBranchColor(getRandomBranchColor());
               }}
               style={{
                 width: '100%',
@@ -403,7 +411,8 @@ const TreeView: React.FC<TreeViewProps> = ({
                         onClick={() => {
                           setShowContextMenu(false);
                           setShowRegenBranchDialog(true);
-                          setRegenBranchName(`Branch-${Date.now()}`);
+                          const parentBranchName = contextMenuMessage?.branch_name || 'main';
+                          setRegenBranchName(getDefaultBranchName('regen', parentBranchName, conversationTree?.branches || []));
                         }}
                         style={{
                           width: '100%',

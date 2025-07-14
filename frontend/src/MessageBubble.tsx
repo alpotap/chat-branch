@@ -1,5 +1,6 @@
 import React, { useState, memo, useCallback } from 'react';
 import { getBranchColor as getUtilBranchColor, getBranchColorFromTree, getRandomBranchColor, BRANCH_COLORS } from './utils/branchColors';
+import { generateUniqueBranchName } from './utils/branchNaming';
 
 interface Message {
   id: string;
@@ -50,12 +51,18 @@ const MessageBubble = memo<MessageBubbleProps>(({
     setShowContextMenu(true);
   }, [message.role]);
 
+  const getDefaultBranchName = (type: 'branch' | 'regen', parentBranchName: string, branches: { name: string }[]) => {
+    const suffix = type === 'branch' ? 'branch' : 'regen';
+    return generateUniqueBranchName(`${parentBranchName}-${suffix}`, branches);
+  };
+
   const handleBranchClick = useCallback(() => {
     setShowContextMenu(false);
     setShowBranchDialog(true);
-    setBranchName(`Branch-${Date.now()}`);
-    setBranchColor(getRandomBranchColor()); // Set random color as default
-  }, []);
+    const parentBranchName = message.branch_name;
+    setBranchName(getDefaultBranchName('branch', parentBranchName, conversationTree?.branches || []));
+    setBranchColor(getRandomBranchColor());
+  }, [message.branch_name, conversationTree]);
 
   const handleCreateBranch = useCallback(() => {
     if (branchName.trim()) {
@@ -69,9 +76,10 @@ const MessageBubble = memo<MessageBubbleProps>(({
   // Regeneration handlers
   const handleRegenInBranchClick = useCallback(() => {
     setShowContextMenu(false);
+    const parentBranchName = message.branch_name;
+    setRegenBranchName(getDefaultBranchName('regen', parentBranchName, conversationTree?.branches || []));
     setShowRegenBranchDialog(true);
-    setRegenBranchName(`regen-${message.branch_name}`);
-  }, [message.branch_name]);
+  }, [message.branch_name, conversationTree]);
 
   const handleRegenInPlaceClick = useCallback(() => {
     setShowContextMenu(false);
