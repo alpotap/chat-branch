@@ -34,29 +34,28 @@ python remove_user.py test@123 --force
 ### 3. **test_context.py** - Test LLM Context Building
 ```bash
 # Test conversation branching and context building
-python test_context.py admin@example.com admin123
+python scripts/test_context.py admin@example.com admin123
 
 # Prerequisites: Backend must be running first
-cd ..\backend
 uvicorn main:app --reload --port 8001
 # Then in another terminal:
-cd ..\scripts
-python test_context.py admin@example.com admin123
+cd backend
+python scripts/test_context.py admin@example.com admin123
 ```
 
 ### 4. **fix_main_branches.py** - Repair Main Branch Issues
 ```bash
 # List conversations with main branch problems
-python fix_main_branches.py --list
+python scripts/fix_main_branches.py --list
 
 # Preview fixes without making changes
-python fix_main_branches.py --fix-all --dry-run
+python scripts/fix_main_branches.py --fix-all --dry-run
 
 # Fix all problematic conversations
-python fix_main_branches.py --fix-all
+python scripts/fix_main_branches.py --fix-all
 
 # Fix a specific conversation
-python fix_main_branches.py --fix-conv <conversation-id>
+python scripts/fix_main_branches.py --fix-conv <conversation-id>
 
 # IMPORTANT: Stop the backend before running fixes!
 ```
@@ -66,25 +65,25 @@ python fix_main_branches.py --fix-conv <conversation-id>
 ### Prerequisites
 1. **PostgreSQL running** with ChatBranch database set up
 2. **Backend environment** configured (`.env` file exists)
-3. **Run from scripts directory**:
+3. **Run from backend directory**:
    ```bash
-   cd "c:\Users\theed\Documents\Research and Papers\ChatBranch\scripts"
+   cd "c:\Users\theed\Documents\Research and Papers\ChatBranch\backend"
    ```
 
 ### Quick Commands
 ```bash
-# Navigate to scripts directory
-cd "c:\Users\theed\Documents\Research and Papers\ChatBranch\scripts"
+# Navigate to backend directory
+cd "c:\Users\theed\Documents\Research and Papers\ChatBranch\backend"
 
 # Create test users
-python add_user.py admin@123 admin123 --admin
-python add_user.py test@123 test123
+python scripts/add_user.py admin@123 admin123 --admin
+python scripts/add_user.py test@123 test123
 
 # List all users
-python remove_user.py --list
+python scripts/remove_user.py --list
 
 # Remove a user
-python remove_user.py test@123
+python scripts/remove_user.py test@123
 ```
 
 ## 🔒 Security Notes
@@ -103,10 +102,16 @@ python remove_user.py test@123
 
 ## 📁 File Structure
 ```
-scripts/
-├── add_user.py      # Create users
-├── remove_user.py   # Delete users
-└── README.md        # This file
+backend/
+├── scripts/
+│   ├── add_user.py      # Create users
+│   ├── remove_user.py   # Delete users
+│   ├── fix_main_branches.py  # Fix database issues
+│   ├── test_context.py  # Test LLM context
+│   └── README.md        # This file
+└── database/
+    ├── init_tables.py   # Schema creation
+    └── setup.py         # Database setup
 ```
 
 ## 🎯 Example Workflow

@@ -13,6 +13,7 @@ git clone https://github.com/keshavnath/chat-branch.git
 cd ChatBranch
 
 # Backend setup
+cd backend
 python -m venv venv
 # Windows: venv\Scripts\activate
 # Linux/macOS: source venv/bin/activate
@@ -23,7 +24,7 @@ python database/setup.py
 python database/init_tables.py
 
 # Frontend setup
-cd frontend
+cd ../frontend
 npm install
 ```
 
@@ -78,15 +79,17 @@ curl -X POST http://localhost:8001/conversations \
 ```
 ChatBranch/
 ├── backend/
-│   ├── app/models.py      # Database models
-│   ├── main.py            # FastAPI app
-│   └── .env               # Config (auto-created)
+│   ├── app/models.py          # Database models
+│   ├── main.py                # FastAPI app
+│   ├── scripts/               # User management scripts
+│   ├── database/              # Schema setup scripts
+│   ├── requirements.txt       # Python dependencies
+│   └── .env                   # Config (auto-created)
 ├── frontend/src/
-│   ├── App.tsx            # Main component + routing
-│   ├── TreeView.tsx       # Conversation tree
-│   └── components/        # React components
-├── database/              # Setup scripts
-└── requirements.txt       # Python deps
+│   ├── App.tsx                # Main component + routing
+│   ├── TreeView.tsx           # Conversation tree
+│   └── components/            # React components
+└── docker-compose.yml         # Docker deployment
 ```
 
 ## Troubleshooting
@@ -94,7 +97,7 @@ ChatBranch/
 **PostgreSQL**: `sudo service postgresql start` (Linux) or start service (Windows)  
 **Port conflicts**: Kill processes on 3000/8001 if needed  
 **Dependencies**: `pip install -r requirements.txt` and `npm install`  
-**Database**: Re-run `python database/setup.py` if connection fails  
+**Database**: Re-run `python backend/database/setup.py` if connection fails  
 
 ## Development Notes
 

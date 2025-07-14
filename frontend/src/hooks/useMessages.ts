@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react';
 import axios from 'axios';
 import { getRandomBranchColor } from '../utils/branchColors';
 
-const API_BASE = 'http://localhost:8001';
+const API_BASE = process.env.REACT_APP_API_BASE;
 
 export const useMessages = () => {
   const [selectedMessage, setSelectedMessage] = useState<string | null>(null);

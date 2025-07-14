@@ -2,6 +2,8 @@ import React, { useCallback, useState } from 'react';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
 
+const API_BASE = process.env.REACT_APP_API_BASE;
+
 interface HeaderControlsProps {
   currentConversation: any;
   currentBranch: string;
@@ -77,7 +79,7 @@ const HeaderControls: React.FC<HeaderControlsProps> = ({
     try {
       // Check for dependent branches
       const response = await axios.get(
-        `http://localhost:8001/conversations/${currentConversation.id}/branches/${currentBranch}/dependents`
+        `${API_BASE}/conversations/${currentConversation.id}/branches/${currentBranch}/dependents`
       );
       
       const dependents = response.data.dependent_branches || [];

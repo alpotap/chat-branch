@@ -8,8 +8,8 @@ import sys
 import os
 from pathlib import Path
 
-# Add the backend directory to the Python path
-backend_dir = Path(__file__).parent.parent / "backend"
+# Add the parent directory (backend) to the Python path
+backend_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_dir))
 
 from app.database import engine, Base
@@ -37,7 +37,7 @@ def main():
     # Check if we're in the right directory
     if not os.path.exists("./requirements.txt"):
         print("❌ Please run this script from the ChatBranch root directory")
-        print("   Example: python database/init_tables.py")
+        print("   Example: python database/init_tables.py  # From backend directory")
         return False
     
     # Check if .env file exists
