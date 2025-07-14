@@ -22,7 +22,9 @@ interface ChatViewProps {
   onBranch: (messageId: string, branchName: string, color?: string) => void;
   onSelectMessage: (messageId: string) => void;
   onBranchSwitch: (messageId: string) => void;
+  onRegenerate: (messageId: string, type: 'branch' | 'place', branchName?: string) => void;
   onRenameBranch: (oldName: string, newName: string) => void;
+  onDeselectMessage?: () => void;
   conversationTree: any;
 }
 
@@ -37,7 +39,9 @@ const ChatView = memo(({
   onBranch,
   onSelectMessage,
   onBranchSwitch,
+  onRegenerate,
   onRenameBranch,
+  onDeselectMessage,
   conversationTree
 }: ChatViewProps) => {
   const [isRenamingBranch, setIsRenamingBranch] = useState(false);
@@ -61,8 +65,15 @@ const ChatView = memo(({
     setNewBranchName('');
   };
 
+  const handleContainerClick = (e: React.MouseEvent) => {
+    // Only deselect if clicking on the container itself, not on child elements
+    if (e.target === e.currentTarget && onDeselectMessage) {
+      onDeselectMessage();
+    }
+  };
+
   return (
-    <div className="chat-container">
+    <div className="chat-container" onClick={handleContainerClick}>
       <div className="branch-info">
         <div className="branch-name-container">
           {isRenamingBranch ? (
@@ -76,6 +87,9 @@ const ChatView = memo(({
                 onBlur={handleBranchRename}
                 autoFocus
                 className="branch-rename-input"
+                autoComplete="off"
+                data-1p-ignore="true"
+                data-lpignore="true"
               />
               <button onClick={handleBranchRename} className="rename-save-btn">✓</button>
               <button onClick={cancelBranchRename} className="rename-cancel-btn">✕</button>
@@ -93,12 +107,9 @@ const ChatView = memo(({
             </div>
           )}
         </div>
-        {selectedMessage && (
-          <span>Selected: {conversationTree?.messages[selectedMessage]?.content.substring(0, 30)}...</span>
-        )}
       </div>
       
-      <div className="messages">
+      <div className="messages" onClick={handleContainerClick}>
         {paginatedMessages.map((message) => (
           <MessageBubble
             key={message.id}
@@ -106,8 +117,10 @@ const ChatView = memo(({
             onBranch={onBranch}
             onSelectMessage={onSelectMessage}
             onBranchSwitch={onBranchSwitch}
+            onRegenerate={onRegenerate}
             isSelected={selectedMessage === message.id}
             depth={0}
+            conversationTree={conversationTree}
           />
         ))}
       </div>

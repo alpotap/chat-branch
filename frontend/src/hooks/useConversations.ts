@@ -24,7 +24,7 @@ interface ConversationTree {
   root_messages: string[];
 }
 
-const API_BASE = 'http://localhost:8001';
+const API_BASE = process.env.REACT_APP_API_BASE;
 
 export const useConversations = () => {
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -47,8 +47,12 @@ export const useConversations = () => {
       setCurrentConversation(tree.conversation);
       setConversationTree(tree);
       return tree;
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error loading conversation:', error);
+      if (error.response?.status === 404) {
+        // Throw specific error for 404 so UI can handle it
+        throw new Error('CONVERSATION_NOT_FOUND');
+      }
       return null;
     }
   }, []);
@@ -94,9 +98,11 @@ export const useConversations = () => {
         await loadConversation(conversationId);
       }
       return true;
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error renaming branch:', error);
-      return false;
+      // Throw the error with details so the UI can handle it properly
+      const errorMessage = error.response?.data?.detail || 'Failed to rename branch';
+      throw new Error(errorMessage);
     }
   }, [currentConversation, loadConversation]);
 

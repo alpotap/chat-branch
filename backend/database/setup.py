@@ -102,7 +102,7 @@ def main():
     # Check if we're in the right directory
     if not os.path.exists("./requirements.txt"):
         print("❌ Please run this script from the ChatBranch root directory")
-        print("   Example: python database/setup.py")
+        print("   Example: python database/setup.py  # From backend directory")
         sys.exit(1)
     
     # Check if PostgreSQL is available
@@ -128,7 +128,7 @@ def main():
         print("\nNext steps:")
         print("  1. Copy backend/.env.example to backend/.env")
         print("  2. Add your API keys to backend/.env")
-        print("  3. Run: python database/init_tables.py")
+        print("  3. Run: python database/init_tables.py  # From backend directory")
     else:
         print("❌ Database setup failed")
         sys.exit(1)

@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { BrowserRouter as Router, Routes, Route, useParams, useNavigate } from 'react-router-dom';
+import axios from 'axios';
 import TreeView from './TreeView';
 import ConversationDebugger from './ConversationDebugger';
 import ConversationSidebar from './components/ConversationSidebar';
@@ -7,10 +8,14 @@ import HeaderControls from './components/HeaderControls';
 import ChatView from './components/ChatView';
 import MessageInput from './components/MessageInput';
 import EmptyState from './components/EmptyState';
+import LoginPage from './components/LoginPage';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { useConversations } from './hooks/useConversations';
 import { useMessages } from './hooks/useMessages';
 import { useBranchMessages } from './hooks/useBranchMessages';
 import './App.css';
+
+const API_BASE = process.env.REACT_APP_API_BASE || '/api';
 
 // Simple undo/redo state for within-conversation navigation
 interface ViewState {
@@ -32,7 +37,14 @@ const ConversationApp: React.FC = () => {
   const navigate = useNavigate();
   const [currentBranch, setCurrentBranch] = useState<string>('main');
   const [selectedModel, setSelectedModel] = useState('gpt-3.5-turbo');
-  const [viewMode, setViewMode] = useState<'chat' | 'tree' | 'debug'>('chat');
+  
+  // Get initial view mode from localStorage or default to 'chat'
+  const getInitialViewMode = (): 'chat' | 'tree' | 'debug' => {
+    const saved = localStorage.getItem('chatbranch-view-mode');
+    return (saved === 'chat' || saved === 'tree' || saved === 'debug') ? saved : 'chat';
+  };
+  
+  const [viewMode, setViewMode] = useState<'chat' | 'tree' | 'debug'>(getInitialViewMode());
   const [messagesPerPage] = useState(20);
   const [debugMode, setDebugMode] = useState(false);
   
@@ -44,6 +56,18 @@ const ConversationApp: React.FC = () => {
     canRedo: false
   });
   const [isNavigating, setIsNavigating] = useState(false);
+  const [intentionallyDeselected, setIntentionallyDeselected] = useState(false);
+  
+  // Message queue to prevent race conditions
+  // Simple lock to prevent race conditions - much more reliable than complex queue
+  const sendingLockRef = useRef(false);
+  
+  // Error modal state
+  const [showErrorModal, setShowErrorModal] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  
+  // Conversation not found modal state
+  const [showConversationNotFoundModal, setShowConversationNotFoundModal] = useState(false);
 
   const {
     conversations,
@@ -64,6 +88,7 @@ const ConversationApp: React.FC = () => {
     newMessage,
     setNewMessage,
     loading,
+    setLoading,
     sendMessage,
     createBranch
   } = useMessages();
@@ -170,21 +195,49 @@ const ConversationApp: React.FC = () => {
   // Load conversation when conversationId changes
   useEffect(() => {
     if (conversationId) {
+      console.log(`🔍 [DEBUG] Loading conversation: ${conversationId}`);
+      
+      // For approach 2: Always default to main branch for consistency
+      // TODO: In future, this could be made configurable per conversation
+      const DEFAULT_BRANCH = 'main';
+      const savedViewMode: 'chat' | 'tree' | 'debug' = getInitialViewMode();
+      
+      // Try to restore saved view mode but always use main branch
+      const savedState = localStorage.getItem('chatbranch-state');
+      if (savedState) {
+        try {
+          const state = JSON.parse(savedState);
+          if (state.conversationId === conversationId && state.viewMode) {
+            // Only restore view mode, not branch (always use main)
+            console.log(`🔍 [DEBUG] Restored view mode: ${state.viewMode}`);
+          }
+        } catch (e) {
+          console.warn('Failed to parse saved state:', e);
+        }
+      }
+      
       // Reset all state when switching conversations
-      setCurrentBranch('main');
-      setViewMode('chat');
+      setCurrentBranch(DEFAULT_BRANCH); // Always start with main branch
+      setViewMode(savedViewMode);
       setSelectedMessage(null);
+      setIntentionallyDeselected(false); // Reset intentional deselection when switching conversations
       setNewMessage('');
       setShowAllMessages(false);
       setUndoRedoState({
-        history: [{ branch: 'main', viewMode: 'chat' }],
+        history: [{ branch: DEFAULT_BRANCH, viewMode: savedViewMode }],
         currentIndex: 0,
         canUndo: false,
         canRedo: false
       });
       
       // Load the conversation data
-      loadConversation(conversationId);
+      loadConversation(conversationId).catch((error) => {
+        if (error.message === 'CONVERSATION_NOT_FOUND') {
+          setShowConversationNotFoundModal(true);
+        } else {
+          console.error('Unexpected error loading conversation:', error);
+        }
+      });
     }
   }, [conversationId, loadConversation, setSelectedMessage, setNewMessage, setShowAllMessages]);
 
@@ -199,34 +252,61 @@ const ConversationApp: React.FC = () => {
     setDebugMode(urlParams.get('debug') === 'true');
   }, []);
 
+  // Debug effect for TreeView data
+  useEffect(() => {
+    if (viewMode === 'tree' && conversationTree) {
+      console.log('🔍 ConversationTree Debug:', {
+        root_messages: conversationTree.root_messages,
+        message_count: Object.keys(conversationTree.messages).length,
+        branches: conversationTree.branches?.map(b => b.name),
+        sample_messages: Object.values(conversationTree.messages).slice(0, 5).map(m => ({
+          id: m.id,
+          role: m.role,
+          branch: m.branch_name,
+          children_count: m.children?.length || 0
+        }))
+      });
+    }
+  }, [viewMode, conversationTree]);
+
   // Auto-select last message when conversation/branch changes (but not during navigation)
   useEffect(() => {
-    if (!isNavigating && allBranchMessages.length > 0 && conversationTree) {
+    if (!isNavigating && !intentionallyDeselected && allBranchMessages.length > 0 && conversationTree) {
       const lastMessage = allBranchMessages[allBranchMessages.length - 1];
-      setSelectedMessage(lastMessage.id);
+      // Only auto-select if no message is currently selected or if the selected message is not in current branch
+      if (!selectedMessage || !allBranchMessages.some(msg => msg.id === selectedMessage)) {
+        setSelectedMessage(lastMessage.id);
+      }
     }
-  }, [currentBranch, allBranchMessages, setSelectedMessage, isNavigating, conversationTree]);
+  }, [currentBranch, allBranchMessages, setSelectedMessage, isNavigating, conversationTree, selectedMessage, intentionallyDeselected]);
+
+  // Helper function to show error modal instead of alert
+  const showError = useCallback((message: string) => {
+    setErrorMessage(message);
+    setShowErrorModal(true);
+  }, []);
 
   const handleCreateConversation = useCallback(async (title?: string) => {
-    const newConv = await createConversation(title);
-    if (newConv) {
-      // Navigate to the new conversation
-      navigate(`/conversation/${newConv.id}`);
+    console.log('🔧 Creating new conversation...');
+    try {
+      const newConv = await createConversation(title);
+      if (newConv) {
+        console.log('✅ Conversation created:', newConv);
+        // Navigate to the new conversation
+        navigate(`/conversation/${newConv.id}`);
+      } else {
+        console.error('❌ Failed to create conversation - no response');
+        showError('Failed to create conversation. Please try again.');
+      }
+    } catch (error) {
+      console.error('❌ Error creating conversation:', error);
+      showError('Failed to create conversation. Please try again.');
     }
-  }, [createConversation, navigate]);
+  }, [createConversation, navigate, showError]);
 
   const handleRenameConversation = useCallback(async (conversationId: string, newTitle: string) => {
     await renameConversation(conversationId, newTitle);
   }, [renameConversation]);
-
-  const handleRenameBranch = useCallback(async (oldBranchName: string, newBranchName: string) => {
-    if (!currentConversation) return;
-    
-    const success = await renameBranch(currentConversation.id, oldBranchName, newBranchName);
-    if (success) {
-      setCurrentBranch(newBranchName);
-    }
-  }, [currentConversation, renameBranch]);
 
   const handleLoadConversation = useCallback(async (conversationId: string) => {
     // Navigate to the conversation URL instead of loading inline
@@ -243,48 +323,163 @@ const ConversationApp: React.FC = () => {
     const success = await deleteConversation(targetConversation.id);
     if (success) {
       if (targetConversation.id === currentConversation?.id) {
+        // If deleting current conversation, navigate to home page
         setSelectedMessage(null);
         setCurrentBranch('main');
         setShowAllMessages(false);
         localStorage.removeItem('chatbranch-state');
+        navigate('/'); // Navigate to home page
       }
       console.log('✅ Conversation deleted successfully');
     } else {
-      alert('Failed to delete conversation. Please try again.');
+      showError('Failed to delete conversation. Please try again.');
     }
-  }, [currentConversation, conversations, deleteConversation, setSelectedMessage, setShowAllMessages]);
+  }, [currentConversation, conversations, deleteConversation, setSelectedMessage, setShowAllMessages, showError, navigate]);
 
   const handleSendMessage = useCallback(async () => {
-    if (!currentConversation) return;
+    if (!currentConversation || !newMessage.trim()) return;
     
-    const success = await sendMessage(
-      currentConversation.id,
-      newMessage,
-      selectedModel,
-      currentBranch,
-      selectedMessage || undefined
-    );
-    
-    if (success) {
-      await loadConversation(currentConversation.id);
+    // Simple lock mechanism - if already sending, ignore the request
+    if (sendingLockRef.current) {
+      console.log('🔒 Message send blocked - already processing another message');
+      return;
     }
-  }, [currentConversation, newMessage, selectedModel, currentBranch, selectedMessage, sendMessage, loadConversation]);
+    
+    // Acquire lock immediately
+    sendingLockRef.current = true;
+    setLoading(true);
+    
+    try {
+      const messageText = newMessage.trim();
+      
+      // Always use the last message in the current branch as parent (unless it's the first message)
+      let parentId: string | undefined = undefined;
+      if (allBranchMessages.length > 0) {
+        const lastMessage = allBranchMessages[allBranchMessages.length - 1];
+        parentId = lastMessage.id;
+        console.log(`🔍 DEBUG: Using last message as parent:`, {
+          currentBranch,
+          lastMessageId: lastMessage.id,
+          lastMessageRole: lastMessage.role,
+          lastMessageContent: lastMessage.content.substring(0, 50) + '...',
+          allBranchMessagesCount: allBranchMessages.length,
+          allBranchMessagesDetails: allBranchMessages.map(msg => ({
+            id: msg.id.substring(0, 8) + '...',
+            role: msg.role,
+            created_at: msg.created_at,
+            content: msg.content.substring(0, 30) + '...'
+          }))
+        });
+      } else {
+        console.log(`🔍 DEBUG: No messages in current branch, using null parent (root message)`);
+      }
+      
+      console.log(`🔍 DEBUG: Sending message with parent_id: ${parentId || 'null'}`);
+      
+      const success = await sendMessage(
+        currentConversation.id,
+        messageText,
+        selectedModel,
+        currentBranch,
+        parentId
+      );
+      
+      if (success) {
+        // Clear selected message so subsequent messages use the most recent message as parent
+        setSelectedMessage(null);
+        setIntentionallyDeselected(false);
+        setNewMessage(''); // Clear input
+        await loadConversation(currentConversation.id);
+      }
+    } catch (error) {
+      console.error('Error sending message:', error);
+    } finally {
+      // Always release lock and stop loading
+      sendingLockRef.current = false;
+      setLoading(false);
+    }
+  }, [currentConversation, newMessage, allBranchMessages, currentBranch, selectedModel, sendMessage, setSelectedMessage, setIntentionallyDeselected, setNewMessage, loadConversation, setLoading]);
 
   const handleCreateBranch = useCallback(async (messageId: string, branchName: string, color?: string) => {
     if (!currentConversation) return;
 
-    const success = await createBranch(currentConversation.id, messageId, branchName, color);
-    if (success) {
+    try {
+      await createBranch(currentConversation.id, messageId, branchName, color);
+      // Immediately update the UI state
       setCurrentBranch(branchName);
       setSelectedMessage(messageId);
-      await loadConversation(currentConversation.id);
       // Switch to chat view after creating branch for immediate use
       setViewMode('chat');
+      // Then reload the conversation to get the updated data
+      await loadConversation(currentConversation.id);
+    } catch (error: any) {
+      console.error('Error creating branch:', error);
+      showError(error.message || 'Failed to create branch. Please try again.');
     }
-  }, [currentConversation, createBranch, loadConversation, setSelectedMessage]);
+  }, [currentConversation, createBranch, loadConversation, setSelectedMessage, showError]);
+
+  const handleRegenerate = useCallback(async (messageId: string, type: 'branch' | 'place', branchName?: string) => {
+    if (!currentConversation) return;
+
+    try {
+      if (type === 'branch') {
+        // Regenerate in new branch
+        const response = await axios.post(`${API_BASE}/conversations/${currentConversation.id}/messages/${messageId}/regenerate-branch`, {
+          branch_name: branchName || 'regen-main'
+        });
+
+        console.log('✅ Branch regeneration successful:', response.data);
+        
+        // Reload conversation to get updated data
+        await loadConversation(currentConversation.id);
+        
+        // Switch to the new branch
+        setCurrentBranch(response.data.branch.name);
+        setViewMode('chat');
+        
+        // Show success message
+        console.log(`✅ ${response.data.message}`);
+        
+      } else {
+        // Regenerate in place
+        const response = await axios.post(`${API_BASE}/conversations/${currentConversation.id}/messages/${messageId}/regenerate-place`);
+
+        console.log('✅ In-place regeneration successful:', response.data);
+        
+        // Reload conversation to get updated data
+        await loadConversation(currentConversation.id);
+      }
+    } catch (error) {
+      console.error('Regeneration error:', error);
+      if (axios.isAxiosError(error) && error.response) {
+        showError(`Failed to regenerate: ${error.response.data.detail || error.message}`);
+      } else {
+        showError('An error occurred during regeneration. Please try again.');
+      }
+    }
+  }, [currentConversation, loadConversation, showError]);
 
   const handleMessageSelect = useCallback((messageId: string) => {
+    // In tree view, always switch branch if message is from different branch
+    // In chat view, only select message without switching branch
+    if (viewMode === 'tree' && conversationTree) {
+      const message = conversationTree.messages[messageId];
+      if (message && message.branch_name !== currentBranch) {
+        // Switch to the message's branch in tree view
+        if (!isNavigating) {
+          saveToHistory(message.branch_name, viewMode, messageId);
+        }
+        setCurrentBranch(message.branch_name);
+      }
+    }
+    // Always select the message regardless of view mode
     setSelectedMessage(messageId);
+    setIntentionallyDeselected(false); // Reset intentional deselection flag
+  }, [setSelectedMessage, conversationTree, currentBranch, isNavigating, saveToHistory, viewMode, setCurrentBranch]);
+
+  const handleDeselectMessage = useCallback(() => {
+    setSelectedMessage(null);
+    setIntentionallyDeselected(true);
   }, [setSelectedMessage]);
 
   const handleBranchSwitch = useCallback((messageId: string) => {
@@ -302,6 +497,7 @@ const ConversationApp: React.FC = () => {
     }
     
     setSelectedMessage(messageId);
+    setIntentionallyDeselected(false); // Reset intentional deselection when switching branches
     if (conversationTree) {
       const message = conversationTree.messages[messageId];
       if (message) {
@@ -318,6 +514,7 @@ const ConversationApp: React.FC = () => {
     
     setCurrentBranch(branchName);
     setSelectedMessage(messageId);
+    setIntentionallyDeselected(false); // Reset intentional deselection when switching to chat view
     setViewMode('chat');
   }, [setSelectedMessage, saveToHistory, isNavigating]);
 
@@ -331,11 +528,25 @@ const ConversationApp: React.FC = () => {
 
   const handleViewModeChange = useCallback((newViewMode: 'chat' | 'tree' | 'debug') => {
     if (newViewMode !== viewMode && !isNavigating) {
-      // Save the NEW state to history (where we're going, not where we were)
-      saveToHistory(currentBranch, newViewMode, selectedMessage || undefined);
+      // If switching from tree to chat view and there's a selected message
+      if (viewMode === 'tree' && newViewMode === 'chat' && selectedMessage && conversationTree) {
+        const selectedMsg = conversationTree.messages[selectedMessage];
+        if (selectedMsg && selectedMsg.branch_name !== currentBranch) {
+          // Switch to the selected message's branch
+          setCurrentBranch(selectedMsg.branch_name);
+          saveToHistory(selectedMsg.branch_name, newViewMode, selectedMessage);
+        } else {
+          saveToHistory(currentBranch, newViewMode, selectedMessage || undefined);
+        }
+      } else {
+        // Save the NEW state to history (where we're going, not where we were)
+        saveToHistory(currentBranch, newViewMode, selectedMessage || undefined);
+      }
     }
     setViewMode(newViewMode);
-  }, [viewMode, currentBranch, selectedMessage, saveToHistory, isNavigating]);
+    // Persist view mode preference to localStorage
+    localStorage.setItem('chatbranch-view-mode', newViewMode);
+  }, [viewMode, currentBranch, selectedMessage, conversationTree, saveToHistory, isNavigating, setCurrentBranch]);
 
   const getAvailableBranches = useCallback((): string[] => {
     if (!conversationTree) return ['main'];
@@ -345,8 +556,13 @@ const ConversationApp: React.FC = () => {
       branches.add(message.branch_name);
     });
     
+    // Always include the current branch (important for newly created branches)
+    if (currentBranch) {
+      branches.add(currentBranch);
+    }
+    
     return Array.from(branches).sort();
-  }, [conversationTree]);
+  }, [conversationTree, currentBranch]);
 
   const handleDeleteBranch = useCallback(async (branchName: string) => {
     if (!currentConversation) return;
@@ -359,6 +575,43 @@ const ConversationApp: React.FC = () => {
     }
   }, [currentConversation, deleteBranch, setSelectedMessage]);
 
+  const handleRenameBranch = useCallback(async (oldName: string, newName: string) => {
+    if (!currentConversation) return;
+    
+    try {
+      await renameBranch(currentConversation.id, oldName, newName);
+      // Update current branch if we renamed the current one
+      if (currentBranch === oldName) {
+        setCurrentBranch(newName);
+      }
+      // Reload conversation to update tree
+      await loadConversation(currentConversation.id);
+    } catch (error: any) {
+      console.error('Error renaming branch:', error);
+      showError(error.message || 'Failed to rename branch. Please try again.');
+      throw error; // Re-throw so the dialog knows there was an error
+    }
+  }, [currentConversation, renameBranch, currentBranch, loadConversation, showError]);
+
+  const handleRecolorBranch = useCallback(async (branchName: string, color: string) => {
+    if (!currentConversation) return;
+    
+    try {
+      console.log(`🎨 [DEBUG] Updating branch color: ${branchName} -> ${color}`);
+      const response = await axios.patch(`${API_BASE}/conversations/${currentConversation.id}/branches/${branchName}/color`, {
+        color: color
+      });
+      console.log(`✅ [DEBUG] Branch color update response:`, response.data);
+      // Reload conversation to update tree with new color
+      await loadConversation(currentConversation.id);
+    } catch (error: any) {
+      console.error('❌ [DEBUG] Error updating branch color:', error);
+      console.error('❌ [DEBUG] Error response:', error.response?.data);
+      console.error('❌ [DEBUG] Error status:', error.response?.status);
+      showError(`Failed to update branch color. ${error.response?.data?.detail || 'Please try again.'}`);
+    }
+  }, [currentConversation, loadConversation, showError]);
+
   return (
     <div className="App">
       <HeaderControls
@@ -367,6 +620,8 @@ const ConversationApp: React.FC = () => {
         availableBranches={getAvailableBranches()}
         onBranchChange={handleBranchChange}
         onDeleteBranch={handleDeleteBranch}
+        onRenameBranch={handleRenameBranch}
+        onRecolorBranch={handleRecolorBranch}
         viewMode={viewMode}
         onViewModeChange={handleViewModeChange}
         selectedModel={selectedModel}
@@ -376,6 +631,7 @@ const ConversationApp: React.FC = () => {
         onGoBack={undo}
         canGoForward={undoRedoState.canRedo}
         onGoForward={redo}
+        hasMessages={allBranchMessages.length > 0}
       />
 
       <div className="main-container">
@@ -399,7 +655,10 @@ const ConversationApp: React.FC = () => {
                     onMessageSelect={handleMessageSelect}
                     onSwitchToChatView={handleSwitchToChatView}
                     onCreateBranch={handleCreateBranch}
+                    onRegenerate={handleRegenerate}
+                    onDeselectMessage={handleDeselectMessage}
                     selectedMessage={selectedMessage || undefined}
+                    conversationTree={conversationTree}
                   />
                 </div>
               ) : viewMode === 'debug' && debugMode ? (
@@ -418,7 +677,9 @@ const ConversationApp: React.FC = () => {
                   onBranch={handleCreateBranch}
                   onSelectMessage={handleMessageSelect}
                   onBranchSwitch={handleBranchSwitch}
+                  onRegenerate={handleRegenerate}
                   onRenameBranch={handleRenameBranch}
+                  onDeselectMessage={handleDeselectMessage}
                   conversationTree={conversationTree}
                 />
               )}
@@ -436,6 +697,62 @@ const ConversationApp: React.FC = () => {
           )}
         </div>
       </div>
+      
+      {/* Error Modal */}
+      {showErrorModal && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <h3>Error</h3>
+            <p>{errorMessage}</p>
+            <div className="modal-buttons">
+              <button 
+                onClick={() => setShowErrorModal(false)}
+                style={{
+                  backgroundColor: '#667eea',
+                  color: 'white',
+                  border: 'none',
+                  padding: '8px 16px',
+                  borderRadius: '4px',
+                  cursor: 'pointer'
+                }}
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Conversation Not Found Modal */}
+      {showConversationNotFoundModal && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <h3>Conversation Not Found</h3>
+            <p>This conversation no longer exists. It may have been deleted.</p>
+            <div style={{ textAlign: 'center', marginTop: '20px' }}>
+              <button 
+                onClick={() => {
+                  setShowConversationNotFoundModal(false);
+                  navigate('/');
+                }}
+                style={{
+                  backgroundColor: '#667eea',
+                  color: 'white',
+                  border: 'none',
+                  padding: '12px 32px',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: '16px',
+                  fontWeight: '500',
+                  minWidth: '160px'
+                }}
+              >
+                Go to Home
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -445,20 +762,41 @@ const Home: React.FC = () => {
   const navigate = useNavigate();
   const { conversations, loadConversations, createConversation, deleteConversation, renameConversation } = useConversations();
   
+  // Error modal state
+  const [showErrorModal, setShowErrorModal] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  
+  // Helper function to show error modal instead of alert
+  const showError = useCallback((message: string) => {
+    setErrorMessage(message);
+    setShowErrorModal(true);
+  }, []);
+  
   useEffect(() => {
     loadConversations();
   }, [loadConversations]);
 
-  const handleCreateConversation = useCallback(async (title?: string) => {
-    const newConv = await createConversation(title);
-    if (newConv) {
-      navigate(`/conversation/${newConv.id}`);
-    }
-  }, [createConversation, navigate]);
-
   const handleLoadConversation = useCallback(async (conversationId: string) => {
     navigate(`/conversation/${conversationId}`);
   }, [navigate]);
+
+  const handleCreateConversation = useCallback(async (title?: string) => {
+    console.log('🔧 Creating new conversation...');
+    try {
+      const newConv = await createConversation(title);
+      if (newConv) {
+        console.log('✅ Conversation created:', newConv);
+        // Navigate to the new conversation
+        navigate(`/conversation/${newConv.id}`);
+      } else {
+        console.error('❌ Failed to create conversation - no response');
+        showError('Failed to create conversation. Please try again.');
+      }
+    } catch (error) {
+      console.error('❌ Error creating conversation:', error);
+      showError('Failed to create conversation. Please try again.');
+    }
+  }, [createConversation, navigate, showError]);
 
   const handleRenameConversation = useCallback(async (conversationId: string, newTitle: string) => {
     await renameConversation(conversationId, newTitle);
@@ -470,18 +808,32 @@ const Home: React.FC = () => {
       if (success) {
         console.log('✅ Conversation deleted successfully');
       } else {
-        alert('Failed to delete conversation. Please try again.');
+        showError('Failed to delete conversation. Please try again.');
       }
     }
-  }, [deleteConversation]);
+  }, [deleteConversation, showError]);
 
   return (
     <div className="App">
-      <div className="header">
-        <div className="header-left">
-          <h1>🌳 ChatBranch</h1>
-        </div>
-      </div>
+      <HeaderControls
+        currentConversation={null}
+        currentBranch=""
+        availableBranches={[]}
+        onBranchChange={() => {}}
+        onDeleteBranch={() => {}}
+        onRenameBranch={() => {}}
+        onRecolorBranch={() => {}}
+        viewMode="chat"
+        onViewModeChange={() => {}}
+        selectedModel="gpt-3.5-turbo"
+        onModelChange={() => {}}
+        debugMode={false}
+        canGoBack={false}
+        onGoBack={() => {}}
+        canGoForward={false}
+        onGoForward={() => {}}
+        hasMessages={false}
+      />
       <div className="main-container">
         <ConversationSidebar
           conversations={conversations}
@@ -495,19 +847,67 @@ const Home: React.FC = () => {
           <EmptyState onCreateConversation={handleCreateConversation} />
         </div>
       </div>
+      
+      {/* Error Modal */}
+      {showErrorModal && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <h3>Error</h3>
+            <p>{errorMessage}</p>
+            <div className="modal-buttons">
+              <button 
+                onClick={() => setShowErrorModal(false)}
+                style={{
+                  backgroundColor: '#667eea',
+                  color: 'white',
+                  border: 'none',
+                  padding: '8px 16px',
+                  borderRadius: '4px',
+                  cursor: 'pointer'
+                }}
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 
-// Main App component with routing
+// Protected App wrapper that handles authentication
+const ProtectedApp: React.FC = () => {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="App" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+        <div>Loading...</div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <LoginPage />;
+  }
+
+  return (
+    <Routes>
+      <Route path="/" element={<Home />} />
+      <Route path="/conversation/:conversationId" element={<ConversationApp />} />
+    </Routes>
+  );
+};
+
+// Main App component with routing and authentication
 const App: React.FC = () => {
   return (
-    <Router>
-      <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/conversation/:conversationId" element={<ConversationApp />} />
-      </Routes>
-    </Router>
+    <AuthProvider>
+      <Router>
+        <ProtectedApp />
+      </Router>
+    </AuthProvider>
   );
 };
 

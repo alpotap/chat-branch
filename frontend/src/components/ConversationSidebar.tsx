@@ -27,6 +27,8 @@ const ConversationSidebar = memo(({
   const [newConversationTitle, setNewConversationTitle] = useState('');
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameTitle, setRenameTitle] = useState('');
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [conversationToDelete, setConversationToDelete] = useState<Conversation | null>(null);
 
   const handleCreateConversation = () => {
     if (newConversationTitle.trim()) {
@@ -56,6 +58,24 @@ const ConversationSidebar = memo(({
     setRenameTitle('');
   };
 
+  const handleDeleteClick = (conv: Conversation) => {
+    setConversationToDelete(conv);
+    setShowDeleteModal(true);
+  };
+
+  const confirmDelete = () => {
+    if (conversationToDelete) {
+      onDeleteConversation(conversationToDelete.id);
+    }
+    setShowDeleteModal(false);
+    setConversationToDelete(null);
+  };
+
+  const cancelDelete = () => {
+    setShowDeleteModal(false);
+    setConversationToDelete(null);
+  };
+
   return (
     <>
       <div className="sidebar">
@@ -69,6 +89,14 @@ const ConversationSidebar = memo(({
           <div 
             key={conv.id} 
             className={`conversation-item ${currentConversation?.id === conv.id ? 'active' : ''}`}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              padding: '8px 12px',
+              cursor: 'pointer',
+              borderRadius: '4px',
+              margin: '2px 0'
+            }}
           >
             {renamingId === conv.id ? (
               <div className="rename-input-container">
@@ -80,16 +108,35 @@ const ConversationSidebar = memo(({
                   onBlur={() => handleRename(conv.id)}
                   autoFocus
                   className="rename-input"
+                  autoComplete="off"
+                  data-1p-ignore="true"
+                  data-lpignore="true"
                 />
                 <button onClick={() => handleRename(conv.id)} className="rename-save-btn">✓</button>
                 <button onClick={cancelRename} className="rename-cancel-btn">✕</button>
               </div>
             ) : (
               <>
-                <span onClick={() => onLoadConversation(conv.id)} className="conversation-title">
-                  {conv.title}
-                </span>
-                <div className="conversation-actions">
+                <div 
+                  onClick={() => onLoadConversation(conv.id)} 
+                  className="conversation-main-content"
+                  style={{
+                    flex: 1,
+                    cursor: 'pointer',
+                    padding: '8px 0',
+                    overflow: 'hidden'
+                  }}
+                >
+                  <span className="conversation-title">
+                    {conv.title}
+                  </span>
+                </div>
+                <div className="conversation-actions" style={{
+                  display: 'flex',
+                  gap: '4px',
+                  marginLeft: '8px',
+                  flexShrink: 0
+                }}>
                   <button 
                     onClick={(e) => {
                       e.stopPropagation();
@@ -97,18 +144,33 @@ const ConversationSidebar = memo(({
                     }}
                     className="rename-btn"
                     title="Rename conversation"
+                    style={{
+                      padding: '4px 6px',
+                      fontSize: '12px',
+                      border: 'none',
+                      background: 'transparent',
+                      cursor: 'pointer',
+                      borderRadius: '2px'
+                    }}
                   >
                     ✏️
                   </button>
                   <button 
                     onClick={(e) => {
                       e.stopPropagation();
-                      if (window.confirm(`Are you sure you want to delete "${conv.title}"? This cannot be undone.`)) {
-                        onDeleteConversation(conv.id);
-                      }
+                      handleDeleteClick(conv);
                     }}
                     className="delete-btn"
                     title="Delete conversation"
+                    style={{
+                      padding: '4px 6px',
+                      fontSize: '12px',
+                      border: 'none',
+                      background: 'transparent',
+                      cursor: 'pointer',
+                      borderRadius: '2px',
+                      color: '#dc3545'
+                    }}
                   >
                     🗑️
                   </button>
@@ -131,12 +193,55 @@ const ConversationSidebar = memo(({
               onChange={(e) => setNewConversationTitle(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && handleCreateConversation()}
               autoFocus
+              autoComplete="off"
+              data-1p-ignore="true"
+              data-lpignore="true"
             />
             <div className="modal-buttons">
               <button onClick={handleCreateConversation}>
                 Create
               </button>
               <button onClick={() => setShowCreateDialog(false)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Conversation Confirmation Dialog */}
+      {showDeleteModal && conversationToDelete && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <h3>Delete Conversation</h3>
+            <p>Are you sure you want to delete "<strong>{conversationToDelete.title}</strong>"?</p>
+            <p style={{ color: '#dc3545', fontWeight: 'bold' }}>This action cannot be undone.</p>
+            <div className="modal-buttons">
+              <button 
+                onClick={confirmDelete}
+                style={{
+                  backgroundColor: '#dc3545',
+                  color: 'white',
+                  border: 'none',
+                  padding: '8px 16px',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  marginRight: '8px'
+                }}
+              >
+                Delete
+              </button>
+              <button 
+                onClick={cancelDelete}
+                style={{
+                  backgroundColor: '#6c757d',
+                  color: 'white',
+                  border: 'none',
+                  padding: '8px 16px',
+                  borderRadius: '4px',
+                  cursor: 'pointer'
+                }}
+              >
                 Cancel
               </button>
             </div>
