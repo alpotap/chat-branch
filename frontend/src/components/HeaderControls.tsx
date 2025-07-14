@@ -251,10 +251,10 @@ const HeaderControls: React.FC<HeaderControlsProps> = ({
           value={selectedModel} 
           onChange={handleModelChange}
         >
-          <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
-          <option value="gpt-4">GPT-4</option>
-          <option value="claude-3-sonnet-20240229">Claude 3 Sonnet</option>
-          <option value="claude-3-haiku-20240307">Claude 3 Haiku</option>
+          {/* <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option> */}
+          {/* <option value="gpt-4">GPT-4</option> */}
+          {/* <option value="claude-3-sonnet-20240229">Claude 3 Sonnet</option> */}
+          {/* <option value="claude-3-haiku-20240307">Claude 3 Haiku</option> */}
           <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
           <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
         </select>
