@@ -765,7 +765,7 @@ class LLMService:
         if use_dummy:
             return await self._generate_dummy_response(context, model)
         if not LITELLM_AVAILABLE:
-            return await self._generate_dummy_response(context, model, error_fallback=True)
+            raise Exception("LiteLLM is not available and USE_DUMMY_RESPONSES is false. Cannot generate response.")
         try:
             # Map frontend model names to LiteLLM model names
             model_map = {
@@ -793,7 +793,7 @@ class LLMService:
             return response.choices[0].message.content
         except Exception as e:
             print(f"❌ Error with real LLM call: {e}")
-            return await self._generate_dummy_response(context, model, error_fallback=True)
+            raise
     
     def _validate_context(self, context: List[Dict]) -> bool:
         """Validate that context is in proper LLM message format"""

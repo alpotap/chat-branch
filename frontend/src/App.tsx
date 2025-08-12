@@ -16,6 +16,7 @@ import { useBranchMessages } from './hooks/useBranchMessages';
 import './App.css';
 
 const API_BASE = process.env.REACT_APP_API_BASE || '/api';
+const DEFAULT_MODEL = 'gemini-2.5-flash';
 
 // Simple undo/redo state for within-conversation navigation
 interface ViewState {
@@ -36,7 +37,7 @@ const ConversationApp: React.FC = () => {
   const { conversationId } = useParams<{ conversationId: string }>();
   const navigate = useNavigate();
   const [currentBranch, setCurrentBranch] = useState<string>('main');
-  const [selectedModel, setSelectedModel] = useState('gpt-3.5-turbo');
+  const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL);
   
   // Get initial view mode from localStorage or default to 'chat'
   const getInitialViewMode = (): 'chat' | 'tree' | 'debug' => {
@@ -106,6 +107,17 @@ const ConversationApp: React.FC = () => {
     messagesPerPage,
     conversationTree  // Pass the entire conversationTree for branch metadata
   );
+
+  // --- Optimistic UI state for pending user message and AI typing ---
+  // pendingUserMessage now tracks error and retry state
+  const [pendingUserMessage, setPendingUserMessage] = useState<null | {
+    id: string;
+    content: string;
+    created_at: string;
+    error?: string;
+    retryCount?: number;
+  }>(null);
+  const [showAITyping, setShowAITyping] = useState(false);
 
   // Save state to localStorage (for refreshing purposes)
   useEffect(() => {
@@ -336,46 +348,18 @@ const ConversationApp: React.FC = () => {
     }
   }, [currentConversation, conversations, deleteConversation, setSelectedMessage, setShowAllMessages, showError, navigate]);
 
-  const handleSendMessage = useCallback(async () => {
-    if (!currentConversation || !newMessage.trim()) return;
-    
-    // Simple lock mechanism - if already sending, ignore the request
-    if (sendingLockRef.current) {
-      console.log('🔒 Message send blocked - already processing another message');
-      return;
-    }
-    
-    // Acquire lock immediately
-    sendingLockRef.current = true;
+  // Helper to send a message (used for both send and retry)
+  const sendUserMessage = useCallback(async (messageText: string, tempId: string, retryCount = 0) => {
+    if (!currentConversation) return;
+    setShowAITyping(true);
     setLoading(true);
-    
     try {
-      const messageText = newMessage.trim();
-      
       // Always use the last message in the current branch as parent (unless it's the first message)
       let parentId: string | undefined = undefined;
       if (allBranchMessages.length > 0) {
         const lastMessage = allBranchMessages[allBranchMessages.length - 1];
         parentId = lastMessage.id;
-        console.log(`🔍 DEBUG: Using last message as parent:`, {
-          currentBranch,
-          lastMessageId: lastMessage.id,
-          lastMessageRole: lastMessage.role,
-          lastMessageContent: lastMessage.content.substring(0, 50) + '...',
-          allBranchMessagesCount: allBranchMessages.length,
-          allBranchMessagesDetails: allBranchMessages.map(msg => ({
-            id: msg.id.substring(0, 8) + '...',
-            role: msg.role,
-            created_at: msg.created_at,
-            content: msg.content.substring(0, 30) + '...'
-          }))
-        });
-      } else {
-        console.log(`🔍 DEBUG: No messages in current branch, using null parent (root message)`);
       }
-      
-      console.log(`🔍 DEBUG: Sending message with parent_id: ${parentId || 'null'}`);
-      
       const success = await sendMessage(
         currentConversation.id,
         messageText,
@@ -383,22 +367,66 @@ const ConversationApp: React.FC = () => {
         currentBranch,
         parentId
       );
-      
       if (success) {
-        // Clear selected message so subsequent messages use the most recent message as parent
         setSelectedMessage(null);
         setIntentionallyDeselected(false);
         setNewMessage(''); // Clear input
+        setPendingUserMessage(null);
+        setShowAITyping(false);
         await loadConversation(currentConversation.id);
+      } else {
+        // Should not happen, but fallback error
+        setPendingUserMessage(prev => prev && prev.id === tempId ? {
+          ...prev,
+          error: 'Unknown error sending message.',
+          retryCount: retryCount + 1,
+        } : prev);
+        setShowAITyping(false);
       }
-    } catch (error) {
-      console.error('Error sending message:', error);
+    } catch (error: any) {
+      setPendingUserMessage(prev => prev && prev.id === tempId ? {
+        ...prev,
+        error: error?.message || 'Failed to send message.',
+        retryCount: retryCount + 1,
+      } : prev);
+      setShowAITyping(false);
+      // Don't clear newMessage so user can edit if desired
     } finally {
-      // Always release lock and stop loading
       sendingLockRef.current = false;
       setLoading(false);
     }
-  }, [currentConversation, newMessage, allBranchMessages, currentBranch, selectedModel, sendMessage, setSelectedMessage, setIntentionallyDeselected, setNewMessage, loadConversation, setLoading]);
+  }, [currentConversation, allBranchMessages, currentBranch, selectedModel, sendMessage, setSelectedMessage, setIntentionallyDeselected, setNewMessage, loadConversation, setLoading]);
+
+  // Main send handler
+  const handleSendMessage = useCallback(async () => {
+    if (!currentConversation || !newMessage.trim()) return;
+    // Prevent multiple pending user messages
+    if (sendingLockRef.current || pendingUserMessage) {
+      console.log('🔒 Message send blocked - already processing another message');
+      return;
+    }
+    // Acquire lock immediately
+    sendingLockRef.current = true;
+    const messageText = newMessage.trim();
+    const tempId = `pending-${Date.now()}`;
+    setPendingUserMessage({
+      id: tempId,
+      content: messageText,
+      created_at: new Date().toISOString(),
+      error: undefined,
+      retryCount: 0,
+    });
+    await sendUserMessage(messageText, tempId, 0);
+  }, [currentConversation, newMessage, pendingUserMessage, sendUserMessage]);
+
+  // Retry handler for failed user message
+  const handleRetrySendMessage = useCallback(async () => {
+    if (!pendingUserMessage || !pendingUserMessage.error) return;
+    if (sendingLockRef.current) return;
+    sendingLockRef.current = true;
+    setPendingUserMessage(prev => prev ? { ...prev, error: undefined } : prev);
+    await sendUserMessage(pendingUserMessage.content, pendingUserMessage.id, pendingUserMessage.retryCount || 0);
+  }, [pendingUserMessage, sendUserMessage]);
 
   const handleCreateBranch = useCallback(async (messageId: string, branchName: string, color?: string) => {
     if (!currentConversation) return;
@@ -681,6 +709,9 @@ const ConversationApp: React.FC = () => {
                   onRenameBranch={handleRenameBranch}
                   onDeselectMessage={handleDeselectMessage}
                   conversationTree={conversationTree}
+                  pendingUserMessage={pendingUserMessage}
+                  showAITyping={showAITyping}
+                  onRetrySendMessage={handleRetrySendMessage}
                 />
               )}
 

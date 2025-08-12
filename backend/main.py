@@ -251,7 +251,7 @@ async def add_message(
         # Generate AI response
         ai_response = await llm_service.generate_response(
             context, 
-            model=message.llm_model or "gpt-3.5-turbo"
+            model=message.llm_model
         )
         
         # Save AI response
@@ -260,7 +260,7 @@ async def add_message(
             role="assistant",
             parent_id=str(db_message.id),  # Convert UUID to string
             branch_name=message.branch_name,
-            llm_model=message.llm_model or "gpt-3.5-turbo"
+            llm_model=message.llm_model
         )
         
         ai_db_message = conversation_service.add_message(db, conversation_id, ai_message, current_user.id)

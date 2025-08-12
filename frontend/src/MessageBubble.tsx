@@ -20,7 +20,9 @@ interface MessageBubbleProps {
   onRegenerate: (messageId: string, type: 'branch' | 'place', branchName?: string) => void;
   isSelected: boolean;
   depth: number;
-  conversationTree?: any; // Add conversation tree to access branch colors
+  conversationTree?: any;
+  error?: string;
+  onRetrySendMessage?: () => void;
 }
 
 const MessageBubble = memo<MessageBubbleProps>(({ 
@@ -31,7 +33,9 @@ const MessageBubble = memo<MessageBubbleProps>(({
   onRegenerate,
   isSelected,
   depth,
-  conversationTree 
+  conversationTree,
+  error,
+  onRetrySendMessage
 }) => {
   const [showContextMenu, setShowContextMenu] = useState(false);
   const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 });
@@ -175,7 +179,31 @@ const MessageBubble = memo<MessageBubbleProps>(({
             {new Date(message.created_at).toLocaleTimeString()}
           </span>
         </div>
-        <div className="content">{message.content}</div>
+        <div className="content">
+          {message.content}
+          {error && (
+            <div className="message-error" style={{ color: '#e53e3e', marginTop: 8, fontSize: '0.95em' }}>
+              <span>❌ {error}</span>
+              {onRetrySendMessage && (
+                <button
+                  onClick={e => { e.stopPropagation(); onRetrySendMessage(); }}
+                  style={{
+                    marginLeft: 12,
+                    background: '#e53e3e',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: 4,
+                    padding: '2px 10px',
+                    cursor: 'pointer',
+                    fontSize: '0.95em',
+                  }}
+                >
+                  Retry
+                </button>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Context Menu */}
