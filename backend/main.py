@@ -228,61 +228,69 @@ async def add_message(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Add a message to a conversation"""
-    # Check if conversation exists and belongs to user
+    """Add a message to a conversation. If the message is from a user, it also generates and saves an AI response."""
     conversation = conversation_service.get_conversation(db, conversation_id, current_user.id)
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversation not found")
+
+    # If the message is not from a user, save it directly (e.g., system message)
+    if message.role != "user":
+        db_message = conversation_service.add_message(db, conversation_id, message, current_user.id)
+        return MessageResponse.from_orm(db_message)
+
+    # --- Transactional User Message and AI Response ---
     
-    # Add user message
-    db_message = conversation_service.add_message(db, conversation_id, message, current_user.id)
+    # 1. Get conversation context BEFORE adding the new user message
+    context = conversation_service.get_message_context(
+        db,
+        conversation_id,
+        message.branch_name,
+        current_user.id
+    )
     
-    # Generate AI response if user message
-    if message.role == "user":
-        # Get conversation context for AI (entire branch history)
-        context = conversation_service.get_message_context(
-            db, 
-            conversation_id, 
-            message.branch_name, 
-            current_user.id
-            # Don't pass parent_message_id - we want full branch context
-        )
-        
-        # Generate AI response
-        ai_response = await llm_service.generate_response(
-            context, 
+    # 2. Append the new user message to the context in memory
+    context.append({"role": "user", "content": message.content})
+    
+    # 3. Generate AI response
+    try:
+        ai_response_content = await llm_service.generate_response(
+            context,
             model=message.llm_model
         )
         
-        # Save AI response
-        ai_message = MessageCreate(
-            content=ai_response,
-            role="assistant",
-            parent_id=str(db_message.id),  # Convert UUID to string
-            branch_name=message.branch_name,
-            llm_model=message.llm_model
+        # Handle empty or error-like responses from the LLM service
+        if not ai_response_content or ai_response_content.strip() == "" or ai_response_content.strip().lower().startswith("error"):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="The AI model failed to generate a valid response."
+            )
+
+    except Exception as e:
+        # If it's already an HTTPException, re-raise it. Otherwise, wrap it.
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"An error occurred with the AI service: {str(e)}"
         )
-        
-        ai_db_message = conversation_service.add_message(db, conversation_id, ai_message, current_user.id)
-        return MessageResponse(
-            id=str(ai_db_message.id),
-            content=ai_db_message.content,
-            role=ai_db_message.role,
-            parent_id=str(ai_db_message.parent_id) if ai_db_message.parent_id else None,
-            branch_name=ai_db_message.branch_name,
-            llm_model=ai_db_message.llm_model,
-            created_at=ai_db_message.created_at
+
+    # 4. Save both user and AI messages in a single transaction
+    try:
+        ai_db_message = conversation_service.add_user_and_ai_messages_transactional(
+            db=db,
+            conversation_id=conversation_id,
+            user_message=message,
+            ai_response_content=ai_response_content,
+            user_id=current_user.id
         )
-    
-    return MessageResponse(
-        id=str(db_message.id),
-        content=db_message.content,
-        role=db_message.role,
-        parent_id=str(db_message.parent_id) if db_message.parent_id else None,
-        branch_name=db_message.branch_name,
-        llm_model=db_message.llm_model,
-        created_at=db_message.created_at
-    )
+        return MessageResponse.from_orm(ai_db_message)
+    except Exception as e:
+        # This would catch database errors during the transaction
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to save messages to the database: {str(e)}"
+        )
 
 @app.post("/conversations/{conversation_id}/branch", response_model=BranchResponse)
 async def create_branch(

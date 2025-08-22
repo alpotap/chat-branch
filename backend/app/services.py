@@ -83,6 +83,47 @@ class ConversationService:
             db.rollback()
             raise e
     
+    def add_user_and_ai_messages_transactional(self, db: Session, conversation_id: str, user_message: MessageCreate, ai_response_content: str, user_id: str) -> Message:
+        """
+        Adds a user message and an AI response to the database in a single transaction.
+        This is the robust way to ensure that user messages are not saved if the AI fails.
+        """
+        # 1. Create user message object
+        db_user_message = Message(
+            conversation_id=conversation_id,
+            content=user_message.content,
+            role='user',
+            parent_id=user_message.parent_id,
+            branch_name=user_message.branch_name or "main",
+            llm_model=user_message.llm_model,
+            user_id=user_id,
+            created_at=datetime.utcnow()
+        )
+        db.add(db_user_message)
+        # We need to flush to get the ID for the parent_id of the AI message
+        db.flush()
+
+        # 2. Create AI message object
+        db_ai_message = Message(
+            conversation_id=conversation_id,
+            content=ai_response_content,
+            role='assistant',
+            parent_id=db_user_message.id,
+            branch_name=user_message.branch_name or "main",
+            llm_model=user_message.llm_model,
+            user_id=user_id,
+            created_at=datetime.utcnow()
+        )
+        db.add(db_ai_message)
+        
+        # 3. Commit the transaction
+        db.commit()
+        
+        # 4. Refresh the AI message to get all DB-defaults
+        db.refresh(db_ai_message)
+        
+        return db_ai_message
+
     def add_message(self, db: Session, conversation_id: str, message: MessageCreate, user_id: str) -> Message:
         """Add a message to a conversation"""
         

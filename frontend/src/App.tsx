@@ -353,6 +353,20 @@ const ConversationApp: React.FC = () => {
     if (!currentConversation) return;
     setShowAITyping(true);
     setLoading(true);
+    // Prevent duplicate sends: if a user message with same content and timestamp exists in current branch, do not send
+    const duplicate = allBranchMessages.some(
+      (msg) =>
+        msg.role === 'user' &&
+        msg.content === messageText &&
+        // Allow some leeway in timestamp (since backend may assign a slightly different time)
+        Math.abs(new Date(msg.created_at).getTime() - new Date().getTime()) < 60000
+    );
+    if (duplicate) {
+      setPendingUserMessage(null);
+      setShowAITyping(false);
+      setLoading(false);
+      return;
+    }
     try {
       // Always use the last message in the current branch as parent (unless it's the first message)
       let parentId: string | undefined = undefined;
@@ -371,7 +385,7 @@ const ConversationApp: React.FC = () => {
         setSelectedMessage(null);
         setIntentionallyDeselected(false);
         setNewMessage(''); // Clear input
-        setPendingUserMessage(null);
+        setPendingUserMessage(null); // Always clear pending/failed message after success
         setShowAITyping(false);
         await loadConversation(currentConversation.id);
       } else {

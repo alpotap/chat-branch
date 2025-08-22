@@ -193,62 +193,71 @@ const TreeView: React.FC<TreeViewProps> = ({
         });
       });
     });
-    // Pending user message node
+    // Pending user message node (only if not already in messages and not duplicated by content)
     if (pendingUserMessage) {
       const branchName = conversationTree?.currentBranch || 'main';
-      let lastMsgId: string | null = null;
-      let lastMsgDate = 0;
-      Object.values(messages).forEach(msg => {
-        if (msg.branch_name === branchName) {
-          const msgDate = new Date(msg.created_at).getTime();
-          if (!lastMsgId || msgDate > lastMsgDate) {
-            lastMsgId = msg.id;
-            lastMsgDate = msgDate;
+      // Check for duplicate user message in same branch with same content
+      const duplicate = Object.values(messages).some(msg =>
+        msg.role === 'user' &&
+        msg.branch_name === branchName &&
+        msg.content.trim() === pendingUserMessage.content.trim() &&
+        new Date(msg.created_at).getTime() >= new Date(pendingUserMessage.created_at).getTime()
+      );
+      if (!duplicate) {
+        let lastMsgId: string | null = null;
+        let lastMsgDate = 0;
+        Object.values(messages).forEach(msg => {
+          if (msg.branch_name === branchName) {
+            const msgDate = new Date(msg.created_at).getTime();
+            if (!lastMsgId || msgDate > lastMsgDate) {
+              lastMsgId = msg.id;
+              lastMsgDate = msgDate;
+            }
           }
-        }
-      });
-      const pendingPos = lastMsgId ? {
-        x: (positions[lastMsgId]?.x || 0),
-        y: (positions[lastMsgId]?.y || 0) + spacingY,
-      } : { x: 0, y: 0 };
-      nodes.push({
-        id: pendingUserMessage.id,
-        type: 'default',
-        position: pendingPos,
-        data: {
-          label: (
-            <div className={`tree-node user pending`} style={{ opacity: pendingUserMessage.error ? 1 : 0.7 }}>
-              <div className="tree-node-header"></div>
-              <div className="tree-node-content">
-                {pendingUserMessage.content}
-                {pendingUserMessage.error && (
-                  <div className="message-error" style={{ color: '#e53e3e', marginTop: 8, fontSize: '0.95em' }}>
-                    <span>❌ {pendingUserMessage.error}</span>
-                    {onRetrySendMessage && (
-                      <button
-                        onClick={e => { e.stopPropagation(); onRetrySendMessage(); }}
-                        style={{ marginLeft: 12, background: '#e53e3e', color: 'white', border: 'none', borderRadius: 4, padding: '2px 10px', cursor: 'pointer', fontSize: '0.95em' }}
-                      >
-                        Retry
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-          ),
-        },
-        style: { background: 'transparent', border: 'none', padding: 0 },
-      });
-      if (lastMsgId) {
-        edges.push({
-          id: `${lastMsgId}-${pendingUserMessage.id}`,
-          source: lastMsgId,
-          target: pendingUserMessage.id,
-          type: 'smoothstep',
-          style: { stroke: '#a0aec0', strokeWidth: 2, strokeDasharray: '4 2' },
-          animated: false,
         });
+        const pendingPos = lastMsgId ? {
+          x: (positions[lastMsgId]?.x || 0),
+          y: (positions[lastMsgId]?.y || 0) + spacingY,
+        } : { x: 0, y: 0 };
+        nodes.push({
+          id: pendingUserMessage.id,
+          type: 'default',
+          position: pendingPos,
+          data: {
+            label: (
+              <div className={`tree-node user pending`} style={{ opacity: pendingUserMessage.error ? 1 : 0.7 }}>
+                <div className="tree-node-header"></div>
+                <div className="tree-node-content">
+                  {pendingUserMessage.content}
+                  {pendingUserMessage.error && (
+                    <div className="message-error" style={{ color: '#e53e3e', marginTop: 8, fontSize: '0.95em' }}>
+                      <span>❌ {pendingUserMessage.error}</span>
+                      {onRetrySendMessage && (
+                        <button
+                          onClick={e => { e.stopPropagation(); onRetrySendMessage(); }}
+                          style={{ marginLeft: 12, background: '#e53e3e', color: 'white', border: 'none', borderRadius: 4, padding: '2px 10px', cursor: 'pointer', fontSize: '0.95em' }}
+                        >
+                          Retry
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ),
+          },
+          style: { background: 'transparent', border: 'none', padding: 0 },
+        });
+        if (lastMsgId) {
+          edges.push({
+            id: `${lastMsgId}-${pendingUserMessage.id}`,
+            source: lastMsgId,
+            target: pendingUserMessage.id,
+            type: 'smoothstep',
+            style: { stroke: '#a0aec0', strokeWidth: 2, strokeDasharray: '4 2' },
+            animated: false,
+          });
+        }
       }
     }
     return { flowNodes: nodes, flowEdges: edges };
