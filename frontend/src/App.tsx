@@ -400,7 +400,7 @@ const ConversationApp: React.FC = () => {
     } catch (error: any) {
       setPendingUserMessage(prev => prev && prev.id === tempId ? {
         ...prev,
-        error: error?.message || 'Failed to send message.',
+        error: 'An error occurred. Please retry.',
         retryCount: retryCount + 1,
       } : prev);
       setShowAITyping(false);
