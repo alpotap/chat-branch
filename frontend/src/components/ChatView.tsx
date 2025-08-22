@@ -24,6 +24,7 @@ interface ChatViewProps {
   onBranchSwitch: (messageId: string) => void;
   onRegenerate: (messageId: string, type: 'branch' | 'place', branchName?: string) => void;
   onRenameBranch: (oldName: string, newName: string) => void;
+  onBeginEdit: (messageId: string, originalContent: string) => void;
   onDeselectMessage?: () => void;
   conversationTree: any;
   pendingUserMessage?: { id: string; content: string; created_at: string; error?: string; retryCount?: number } | null;
@@ -48,7 +49,8 @@ const ChatView = memo(({
   conversationTree,
   pendingUserMessage,
   showAITyping,
-  onRetrySendMessage
+  onRetrySendMessage,
+  onBeginEdit
 }: ChatViewProps) => {
   const [isRenamingBranch, setIsRenamingBranch] = useState(false);
   const [newBranchName, setNewBranchName] = useState('');
@@ -125,6 +127,7 @@ const ChatView = memo(({
             onSelectMessage={onSelectMessage}
             onBranchSwitch={onBranchSwitch}
             onRegenerate={onRegenerate}
+            onBeginEdit={onBeginEdit}
             isSelected={selectedMessage === message.id}
             depth={0}
             conversationTree={conversationTree}
@@ -146,6 +149,7 @@ const ChatView = memo(({
             onSelectMessage={onSelectMessage}
             onBranchSwitch={onBranchSwitch}
             onRegenerate={onRegenerate}
+            onBeginEdit={() => {}} // No-op for pending messages
             isSelected={false}
             depth={0}
             conversationTree={conversationTree}

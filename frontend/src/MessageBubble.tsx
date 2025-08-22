@@ -18,6 +18,7 @@ interface MessageBubbleProps {
   onSelectMessage: (messageId: string) => void;
   onBranchSwitch: (messageId: string) => void;
   onRegenerate: (messageId: string, type: 'branch' | 'place', branchName?: string) => void;
+  onBeginEdit: (messageId: string, originalContent: string) => void;
   isSelected: boolean;
   depth: number;
   conversationTree?: any;
@@ -31,6 +32,7 @@ const MessageBubble = memo<MessageBubbleProps>(({
   onSelectMessage, 
   onBranchSwitch,
   onRegenerate,
+  onBeginEdit,
   isSelected,
   depth,
   conversationTree,
@@ -47,13 +49,9 @@ const MessageBubble = memo<MessageBubbleProps>(({
 
   const handleRightClick = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
-    // Only allow branching from assistant messages
-    if (message.role !== 'assistant') {
-      return;
-    }
     setContextMenuPos({ x: e.clientX, y: e.clientY });
     setShowContextMenu(true);
-  }, [message.role]);
+  }, []);
 
   const getDefaultBranchName = (type: 'branch' | 'regen', parentBranchName: string, branches: { name: string }[]) => {
     const suffix = type === 'branch' ? 'branch' : 'regen';
@@ -217,44 +215,53 @@ const MessageBubble = memo<MessageBubbleProps>(({
             className="context-menu"
             style={{ left: contextMenuPos.x, top: contextMenuPos.y }}
           >
-            <button onClick={handleBranchClick}>
-              🌿 Create Branch Here
-            </button>
+            {message.role === 'user' && (
+              <button onClick={() => { onBeginEdit(message.id, message.content); setShowContextMenu(false); }}>
+                ✏️ Edit Message
+              </button>
+            )}
+            {message.role === 'assistant' && (
+              <button onClick={handleBranchClick}>
+                🌿 Create Branch Here
+              </button>
+            )}
             <button onClick={() => { onSelectMessage(message.id); setShowContextMenu(false); }}>
               📍 Select Message
             </button>
             <hr style={{ margin: '4px 0', border: 'none', borderTop: '1px solid #ddd' }} />
-            {canRegenerate() ? (
-              <>
-                {!isResponseToFirstMessage() && (
-                  <button onClick={handleRegenInBranchClick}>
-                    🔄 Re-generate in New Branch
+            {message.role === 'assistant' && (
+              canRegenerate() ? (
+                <>
+                  {!isResponseToFirstMessage() && (
+                    <button onClick={handleRegenInBranchClick}>
+                      🔄 Re-generate in New Branch
+                    </button>
+                  )}
+                  <button 
+                    onClick={handleRegenInPlaceClick}
+                    style={{ display: 'flex', alignItems: 'center', gap: '4px' }}
+                    title="Warning: This will replace the current response"
+                  >
+                    ⚠️ Re-generate in Place
+                    <span style={{ fontSize: '12px', color: '#666' }}>ⓘ</span>
                   </button>
-                )}
+                </>
+              ) : (
                 <button 
-                  onClick={handleRegenInPlaceClick}
-                  style={{ display: 'flex', alignItems: 'center', gap: '4px' }}
-                  title="Warning: This will replace the current response"
+                  disabled
+                  style={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    gap: '4px',
+                    opacity: 0.5,
+                    cursor: 'not-allowed'
+                  }}
+                  title="Cannot regenerate: This message has follow-up responses or branches"
                 >
-                  ⚠️ Re-generate in Place
+                  🚫 Cannot Regenerate
                   <span style={{ fontSize: '12px', color: '#666' }}>ⓘ</span>
                 </button>
-              </>
-            ) : (
-              <button 
-                disabled
-                style={{ 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  gap: '4px',
-                  opacity: 0.5,
-                  cursor: 'not-allowed'
-                }}
-                title="Cannot regenerate: This message has follow-up responses or branches"
-              >
-                🚫 Cannot Regenerate
-                <span style={{ fontSize: '12px', color: '#666' }}>ⓘ</span>
-              </button>
+              )
             )}
           </div>
         </>

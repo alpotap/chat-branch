@@ -617,15 +617,7 @@ async def regenerate_message_in_place(
         db.commit()
         db.refresh(ai_message)
         
-        return MessageResponse(
-            id=str(ai_message.id),
-            content=ai_message.content,
-            role=ai_message.role,
-            parent_id=str(ai_message.parent_id) if ai_message.parent_id else None,
-            branch_name=ai_message.branch_name,
-            llm_model=ai_message.llm_model,
-            created_at=ai_message.created_at
-        )
+        return MessageResponse.from_orm(ai_message)
         
     except ValueError as e:
         print(f"❌ In-place regeneration validation error: {str(e)}")
@@ -635,6 +627,83 @@ async def regenerate_message_in_place(
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail="An error occurred while regenerating the message. Please try again.")
+
+@app.put("/conversations/{conversation_id}/messages/{message_id}", response_model=MessageResponse)
+async def edit_message_in_place(
+    conversation_id: str,
+    message_id: str,
+    request: dict, # Expects {"content": "new content"}
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Edit a user message in-place, only if it is a leaf node."""
+    new_content = request.get("content")
+    if not new_content:
+        raise HTTPException(status_code=400, detail="New content not provided.")
+    try:
+        updated_message = conversation_service.edit_message_in_place(
+            db, conversation_id, message_id, new_content, current_user.id
+        )
+        return MessageResponse.from_orm(updated_message)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/conversations/{conversation_id}/messages/{message_id}/edit-as-branch", response_model=MessageResponse)
+async def edit_message_as_branch(
+    conversation_id: str,
+    message_id: str,
+    request: dict, # Expects {"content": "new content"}
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Edit a user message by creating a new branch from its parent."""
+    new_content = request.get("content")
+    if not new_content:
+        raise HTTPException(status_code=400, detail="New content not provided.")
+
+    try:
+        # 1. Create the new branch and get parameters for the new message
+        params = conversation_service.edit_message_as_branch(
+            db, conversation_id, message_id, current_user.id
+        )
+        
+        # 2. Create the new message object for the API
+        new_message_create = MessageCreate(
+            content=new_content,
+            role="user",
+            parent_id=params["parent_id"],
+            branch_name=params["branch_name"],
+            llm_model=params["llm_model"]
+        )
+
+        # 3. Get context and generate AI response
+        context = conversation_service.get_message_context(
+            db, conversation_id, new_message_create.branch_name, current_user.id
+        )
+        context.append({"role": "user", "content": new_message_create.content})
+
+        ai_response_content = await llm_service.generate_response(context, model=new_message_create.llm_model)
+        if not ai_response_content or ai_response_content.strip() == "":
+             raise HTTPException(status_code=503, detail="AI failed to generate a valid response.")
+
+        # 4. Save both messages transactionally
+        ai_db_message = conversation_service.add_user_and_ai_messages_transactional(
+            db=db,
+            conversation_id=conversation_id,
+            user_message=new_message_create,
+            ai_response_content=ai_response_content,
+            user_id=current_user.id
+        )
+        return MessageResponse.from_orm(ai_db_message)
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        db.rollback()
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {str(e)}")
+
 
 @app.get("/conversations/{conversation_id}/debug")
 async def debug_conversation(

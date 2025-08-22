@@ -232,6 +232,50 @@ class ConversationService:
         
         return llm_context
     
+    def edit_message_in_place(self, db: Session, conversation_id: str, message_id: str, new_content: str, user_id: str) -> Message:
+        """Edits a message in-place, with safety checks."""
+        message = db.query(Message).filter(
+            Message.id == message_id,
+            Message.conversation_id == conversation_id,
+            Message.user_id == user_id
+        ).first()
+
+        if not message:
+            raise ValueError("Message not found or access denied.")
+
+        child_count = db.query(Message).filter(Message.parent_id == message_id).count()
+        if child_count > 0:
+            raise ValueError("Cannot edit a message in-place that has replies.")
+
+        message.content = new_content
+        db.commit()
+        db.refresh(message)
+        return message
+
+    def edit_message_as_branch(self, db: Session, conversation_id: str, original_message_id: str, user_id: str) -> dict:
+        """
+        Creates a new branch from the parent of the original message.
+        Returns the necessary info to create the new message (parent_id, branch_name, model).
+        """
+        original_message = db.query(Message).filter(Message.id == original_message_id, Message.user_id == user_id).first()
+        if not original_message:
+            raise ValueError("Original message not found or access denied.")
+        if not original_message.parent_id:
+            raise ValueError("Cannot create a branch-edit from the first message.")
+
+        branch_point_message_id = original_message.parent_id
+        base_name = f"edit-{original_message.branch_name}"
+        new_branch_name = self.generate_unique_branch_name(db, conversation_id, base_name, user_id)
+
+        branch_data = BranchCreate(name=new_branch_name, created_from_message_id=str(branch_point_message_id), color="#FFC107") # Amber color for edits
+        self.create_branch(db, conversation_id, branch_data, user_id)
+
+        return {
+            "parent_id": str(branch_point_message_id),
+            "branch_name": new_branch_name,
+            "llm_model": original_message.llm_model
+        }
+    
     def _build_conversation_thread(self, branch_messages: List[Message], start_message: Message) -> List[Message]:
         """Build a chronological conversation thread starting from a message"""
         thread = [start_message]

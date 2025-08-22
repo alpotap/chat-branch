@@ -118,6 +118,7 @@ const ConversationApp: React.FC = () => {
     retryCount?: number;
   }>(null);
   const [showAITyping, setShowAITyping] = useState(false);
+  const [editingMessage, setEditingMessage] = useState<null | { id: string; content: string; isLeaf: boolean; isFirst: boolean; }>(null);
 
   // Save state to localStorage (for refreshing purposes)
   useEffect(() => {
@@ -654,6 +655,36 @@ const ConversationApp: React.FC = () => {
     }
   }, [currentConversation, loadConversation, showError]);
 
+  const handleBeginEdit = useCallback((messageId: string, originalContent: string) => {
+    if (!conversationTree) return;
+    const messageNode = conversationTree.messages[messageId];
+    const isLeaf = !messageNode || !messageNode.children || messageNode.children.length === 0;
+    const isFirst = conversationTree.root_messages.includes(messageId);
+    setEditingMessage({ id: messageId, content: originalContent, isLeaf: isLeaf, isFirst: isFirst });
+  }, [conversationTree]);
+
+  const handleCommitEdit = useCallback(async (messageId: string, newContent: string, editType: 'in-place' | 'branch') => {
+    if (!currentConversation) return;
+
+    // Rely on the global axios interceptor to add the token.
+    try {
+      if (editType === 'in-place') {
+        await axios.put(`${API_BASE}/conversations/${currentConversation.id}/messages/${messageId}`,
+          { content: newContent }
+        );
+      } else {
+        await axios.post(`${API_BASE}/conversations/${currentConversation.id}/messages/${messageId}/edit-as-branch`,
+          { content: newContent }
+        );
+      }
+      setEditingMessage(null);
+      await loadConversation(currentConversation.id);
+    } catch (error: any) {
+      console.error("Failed to edit message:", error);
+      showError(error.response?.data?.detail || "Failed to edit message.");
+    }
+  }, [currentConversation, loadConversation, showError]);
+
   return (
     <div className="App">
       <HeaderControls
@@ -726,6 +757,7 @@ const ConversationApp: React.FC = () => {
                   pendingUserMessage={pendingUserMessage}
                   showAITyping={showAITyping}
                   onRetrySendMessage={handleRetrySendMessage}
+                  onBeginEdit={handleBeginEdit}
                 />
               )}
 
@@ -743,6 +775,40 @@ const ConversationApp: React.FC = () => {
         </div>
       </div>
       
+      {/* Edit Message Modal */}
+      {editingMessage && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <h3>Edit Message</h3>
+            <textarea
+              value={editingMessage.content}
+              onChange={(e) => setEditingMessage({ ...editingMessage, content: e.target.value })}
+              className="edit-textarea"
+              autoFocus
+            />
+            <div className="modal-buttons-vertical">
+              <button 
+                onClick={() => handleCommitEdit(editingMessage.id, editingMessage.content, 'in-place')}
+                disabled={!editingMessage.isLeaf}
+                title={editingMessage.isLeaf ? "Replaces the current message. Only for messages with no replies." : "Can only edit the last message of a branch in-place"}
+              >
+                ✏️ Save In-place
+              </button>
+              <button 
+                onClick={() => handleCommitEdit(editingMessage.id, editingMessage.content, 'branch')}
+                disabled={editingMessage.isFirst}
+                title={editingMessage.isFirst ? "Cannot create a branch from the very first message" : "Preserves history by creating a new branch from the previous message."}
+              >
+                🌿 Save as New Branch
+              </button>
+              <button className="cancel-button" onClick={() => setEditingMessage(null)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Error Modal */}
       {showErrorModal && (
         <div className="modal-overlay">
