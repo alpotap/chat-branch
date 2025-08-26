@@ -673,9 +673,15 @@ const ConversationApp: React.FC = () => {
           { content: newContent }
         );
       } else {
-        await axios.post(`${API_BASE}/conversations/${currentConversation.id}/messages/${messageId}/edit-as-branch`,
+        const response = await axios.post(`${API_BASE}/conversations/${currentConversation.id}/messages/${messageId}/edit-as-branch`,
           { content: newContent }
         );
+        // After creating a branch, switch to it
+        if (response.data && response.data.branch_name) {
+          setCurrentBranch(response.data.branch_name);
+          setViewMode('chat');
+          setSelectedMessage(response.data.id);
+        }
       }
       setEditingMessage(null);
       await loadConversation(currentConversation.id);
@@ -683,7 +689,7 @@ const ConversationApp: React.FC = () => {
       console.error("Failed to edit message:", error);
       showError(error.response?.data?.detail || "Failed to edit message.");
     }
-  }, [currentConversation, loadConversation, showError]);
+  }, [currentConversation, loadConversation, showError, setCurrentBranch, setViewMode, setSelectedMessage]);
 
   return (
     <div className="App">
