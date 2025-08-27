@@ -4,7 +4,7 @@ import uuid
 import os
 import random
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 import random
 import asyncio
 import os
@@ -32,8 +32,8 @@ class ConversationService:
         db_conversation = Conversation(
             title=conversation.title,
             user_id=user_id,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
         )
         db.add(db_conversation)
         db.commit()
@@ -97,7 +97,7 @@ class ConversationService:
             branch_name=user_message.branch_name or "main",
             llm_model=user_message.llm_model,
             user_id=user_id,
-            created_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc)
         )
         db.add(db_user_message)
         # We need to flush to get the ID for the parent_id of the AI message
@@ -112,7 +112,7 @@ class ConversationService:
             branch_name=user_message.branch_name or "main",
             llm_model=user_message.llm_model,
             user_id=user_id,
-            created_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc)
         )
         db.add(db_ai_message)
         
@@ -151,7 +151,7 @@ class ConversationService:
             branch_name=message.branch_name or "main",
             llm_model=message.llm_model,
             user_id=user_id,
-            created_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc)
         )
         
         print(f"💬 Adding message to conversation {conversation_id}: {message.role} in branch '{message.branch_name or 'main'}'")
@@ -345,7 +345,7 @@ class ConversationService:
             created_from_message_id=branch.created_from_message_id,
             color=branch.color,
             user_id=user_id,
-            created_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc)
         )
         db.add(db_branch)
         db.commit()
@@ -492,6 +492,115 @@ class ConversationService:
         db.commit()
         return False
     
+    def soft_delete_last_user_message(self, db: Session, conversation_id: str, message_id: str, user_id: str) -> Dict:
+        """
+        Soft-delete the specified user message if it's the last active message (no active children) in its branch.
+        If the message is the only active message in its branch and the branch is not 'main', also soft-delete the branch.
+
+        Returns a dict: {"message_id": str, "branch_name": str, "branch_deleted": bool}
+        """
+        # Fetch the target message and validate ownership/activity
+        msg = db.query(Message).filter(
+            Message.id == message_id,
+            Message.conversation_id == conversation_id,
+            Message.user_id == user_id,
+            Message.is_active == True
+        ).first()
+
+        if not msg:
+            raise ValueError("Message not found or already inactive")
+
+        if msg.role != "user":
+            raise ValueError("Only user messages can be deleted")
+
+        # Determine branch name for later checks
+        branch_name = msg.branch_name or "main"
+
+        # Ensure the message has no active children (i.e., it's a leaf)
+        active_children = db.query(Message).filter(
+            Message.parent_id == message_id,
+            Message.conversation_id == conversation_id,
+            Message.user_id == user_id,
+            Message.is_active == True
+        ).all()
+
+        # If there are active children, normally deletion is forbidden. However we allow
+        # deleting the user message together with its immediate assistant response when
+        # and only when that assistant child is the most recent active message in the branch
+        # and that assistant has no active children of its own. This implements the
+        # "delete last user-system pair" behavior.
+        allow_delete_pair = False
+        assistant_child = None
+        if len(active_children) > 1:
+            # More than one active child -> cannot safely delete
+            raise ValueError("Cannot delete message that has follow-up responses. Only the most recent leaf message can be deleted.")
+        elif len(active_children) == 1:
+            child = active_children[0]
+            # Only consider the special pair-case when the single child is an assistant reply
+            if child.role == "assistant":
+                # Ensure the assistant child itself has no active children
+                child_active_children_count = db.query(Message).filter(
+                    Message.parent_id == child.id,
+                    Message.conversation_id == conversation_id,
+                    Message.user_id == user_id,
+                    Message.is_active == True
+                ).count()
+                if child_active_children_count == 0:
+                    # Check that this assistant child is the most recent active message in the branch
+                    latest_active_msg = db.query(Message).filter(
+                        Message.conversation_id == conversation_id,
+                        Message.branch_name == branch_name,
+                        Message.user_id == user_id,
+                        Message.is_active == True
+                    ).order_by(Message.created_at.desc()).first()
+
+                    if latest_active_msg and latest_active_msg.id == child.id:
+                        allow_delete_pair = True
+                        assistant_child = child
+            if not allow_delete_pair:
+                raise ValueError("Cannot delete message that has follow-up responses. Only the most recent leaf message can be deleted.")
+
+        # Count active messages in the branch to determine if branch should also be soft-deleted
+        active_messages_in_branch = db.query(Message).filter(
+            Message.conversation_id == conversation_id,
+            Message.branch_name == branch_name,
+            Message.user_id == user_id,
+            Message.is_active == True
+        ).count()
+
+        try:
+            # Soft-delete the message (user)
+            msg.is_active = False
+            db.add(msg)
+
+            branch_deleted = False
+
+            # If we're deleting an assistant child together with the user message, soft-delete it too
+            if assistant_child is not None and assistant_child.is_active:
+                assistant_child.is_active = False
+                db.add(assistant_child)
+                # Adjust the active messages count to reflect both deletions
+                active_messages_in_branch -= 1
+
+            # If this was the only active message in the branch and branch != main, soft-delete the branch
+            if active_messages_in_branch <= 1 and branch_name != "main":
+                branch = db.query(Branch).filter(
+                    Branch.conversation_id == conversation_id,
+                    Branch.name == branch_name,
+                    Branch.user_id == user_id,
+                    Branch.is_active == True
+                ).first()
+                if branch:
+                    branch.is_active = False
+                    db.add(branch)
+                    branch_deleted = True
+
+            db.commit()
+            return {"message_id": message_id, "branch_name": branch_name, "branch_deleted": branch_deleted}
+        except Exception:
+            db.rollback()
+            raise
+    
     def regenerate_message_in_branch(self, db: Session, conversation_id: str, message_id: str, branch_name: str, user_id: str) -> tuple[Branch, Message]:
         """Regenerate an AI message by creating a new branch from the previous user message"""
         # Get the AI message to regenerate
@@ -561,7 +670,7 @@ class ConversationService:
             branch_name=final_branch_name,
             llm_model=user_message.llm_model,
             user_id=user_id,
-            created_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc)
         )
         
         db.add(new_user_message)

@@ -25,6 +25,7 @@ interface ChatViewProps {
   onRegenerate: (messageId: string, type: 'branch' | 'place', branchName?: string, switchToChat?: boolean) => void;
   onRenameBranch: (oldName: string, newName: string) => void;
   onBeginEdit: (messageId: string, originalContent: string) => void;
+  onRequestDelete?: (message: Message) => void;
   onDeselectMessage?: () => void;
   conversationTree: any;
   pendingUserMessage?: { id: string; content: string; created_at: string; error?: string; retryCount?: number } | null;
@@ -46,6 +47,7 @@ const ChatView = memo(({
   onRegenerate,
   onRenameBranch,
   onDeselectMessage,
+  onRequestDelete,
   conversationTree,
   pendingUserMessage,
   showAITyping,
@@ -128,6 +130,7 @@ const ChatView = memo(({
             onBranchSwitch={onBranchSwitch}
             onRegenerate={onRegenerate}
             onBeginEdit={onBeginEdit}
+                      onRequestDelete={onRequestDelete}
             isSelected={selectedMessage === message.id}
             depth={0}
             conversationTree={conversationTree}

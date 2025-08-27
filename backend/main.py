@@ -12,7 +12,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.database import get_db, engine
 from app.models import Base, Conversation, Message, Branch, User
@@ -614,15 +614,15 @@ async def regenerate_message_in_place(
             context,
             llm_model
         )
-        
+
         # Update the existing AI message content instead of deleting and recreating
         ai_message.content = ai_response
-        ai_message.created_at = datetime.utcnow()  # Update timestamp
+        ai_message.created_at = datetime.now(timezone.utc)  # Update timestamp
         db.commit()
         db.refresh(ai_message)
-        
+
         return MessageResponse.from_orm(ai_message)
-        
+
     except ValueError as e:
         print(f"❌ In-place regeneration validation error: {str(e)}")
         raise HTTPException(status_code=400, detail="Unable to regenerate this message. Please try regenerating the most recent message in the conversation.")
@@ -717,6 +717,38 @@ async def debug_conversation(
     """Debug conversation integrity issues"""
     diagnostics = conversation_service.validate_conversation_integrity(db, conversation_id)
     return diagnostics
+
+
+@app.post("/conversations/{conversation_id}/messages/{message_id}/soft-delete")
+async def soft_delete_message(
+    conversation_id: str,
+    message_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Soft-delete the last user message in a branch (and optionally the branch).
+
+    Rules enforced by service:
+    - Only user messages may be deleted
+    - Message must be active and must be a leaf (no active children)
+    - If it is the only active message in a non-main branch, the branch is soft-deleted
+    """
+    try:
+        # Validate conversation exists and belongs to user
+        conversation = conversation_service.get_conversation(db, conversation_id, current_user.id)
+        if not conversation:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+        result = conversation_service.soft_delete_last_user_message(db, conversation_id, message_id, current_user.id)
+
+        return {"success": True, "result": result}
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Failed to soft-delete message")
 
 @app.post("/conversations/{conversation_id}/fix")
 async def fix_conversation(

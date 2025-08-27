@@ -143,6 +143,25 @@ Quick overview:
 3. **Run backend and frontend** in separate terminals
 4. **Open browser** to http://localhost:3000
 
+### Fixing missing `is_active` columns
+
+If you see errors about missing `branches.is_active` or `messages.is_active` (for example when upgrading branches or running the frontend), you can run the provided helper to add those columns safely:
+
+From the repo root (uses the same DATABASE_URL your backend is configured with):
+
+PowerShell (venv):
+```powershell
+& "./venv/Scripts/Activate.ps1"
+python backend\database\ensure_is_active_columns.py
+```
+
+Or, inside the running backend container:
+```powershell
+docker compose exec backend python backend/database/ensure_is_active_columns.py
+```
+
+This is an idempotent helper intended as a stop-gap; for production use create a proper Alembic migration.
+
 The application runs locally on your machine with full data privacy and control.
 
 ## Support and Development

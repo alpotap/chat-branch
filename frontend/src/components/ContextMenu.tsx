@@ -21,6 +21,7 @@ interface ContextMenuProps {
   onOpenBranchDialog?: (messageId: string) => void;
   onOpenRegenBranchDialog?: (messageId: string) => void;
   onRegenerate?: (messageId: string, type: 'branch' | 'place', branchName?: string, switchToChat?: boolean) => void;
+  onRequestDelete?: (message: Message) => void;
   conversationTree?: any;
 }
 
@@ -34,6 +35,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
   onOpenBranchDialog,
   onOpenRegenBranchDialog,
   onRegenerate,
+  onRequestDelete,
   conversationTree,
 }) => {
   const canRegenerate = () => {
@@ -68,6 +70,17 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
         {message.role === 'user' && onBeginEdit && (
           <button onClick={() => { onBeginEdit(message.id, message.content); onClose(); }}>
             ✏️ Edit Message
+          </button>
+        )}
+        {message.role === 'user' && onRequestDelete && (
+          <button
+            onClick={() => {
+              onRequestDelete(message);
+              onClose();
+            }}
+            style={{ color: '#b22222' }}
+          >
+            🗑️ Delete Message
           </button>
         )}
         {message.role === 'assistant' && (

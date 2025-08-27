@@ -105,3 +105,26 @@ ChatBranch/
 - **Auto-reload**: Both frontend and backend reload on changes
 - **Browser nav**: Each conversation has its own URL
 - **Real LLMs**: Set `USE_DUMMY_RESPONSES=false` in `backend/.env` and add API keys
+
+## Database migrations (Alembic)
+
+This project includes a lightweight Alembic environment under `backend/alembic/` so you can run migrations from the `backend` folder.
+
+1. Ensure your `DATABASE_URL` environment variable is set (or edit `backend/alembic.ini`).
+2. From the repo root, run (PowerShell):
+
+```powershell
+cd backend
+& "..\venv\Scripts\Activate.ps1"
+alembic upgrade head
+```
+
+If you just need to apply the quick migration to add missing `is_active` columns, you can also run:
+
+```powershell
+python backend\alembic\versions\0001_add_is_active_columns.py
+# or
+alembic upgrade head
+```
+
+Note: For production, generate and track new revisions with `alembic revision --autogenerate -m "describe change"` and commit them.

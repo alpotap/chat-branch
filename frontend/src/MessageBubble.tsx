@@ -20,6 +20,7 @@ interface MessageBubbleProps {
   onBranchSwitch: (messageId: string) => void;
   onRegenerate: (messageId: string, type: 'branch' | 'place', branchName?: string, switchToChat?: boolean) => void;
   onBeginEdit: (messageId: string, originalContent: string) => void;
+  onRequestDelete?: (message: Message) => void;
   isSelected: boolean;
   depth: number;
   conversationTree?: any;
@@ -34,6 +35,7 @@ const MessageBubble = memo<MessageBubbleProps>(({
   onBranchSwitch,
   onRegenerate,
   onBeginEdit,
+  onRequestDelete,
   isSelected,
   depth,
   conversationTree,

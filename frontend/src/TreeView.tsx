@@ -36,6 +36,7 @@ interface TreeViewProps {
   onRegenerate?: (messageId: string, type: 'branch' | 'place', branchName?: string, switchToChat?: boolean) => void;
   onBeginEdit?: (messageId: string, originalContent: string, originView?: 'chat' | 'tree') => void;
   onDeselectMessage?: () => void;
+  onRequestDelete?: (message: Message) => void;
   selectedMessage?: string;
   conversationTree?: any;
   pendingUserMessage?: { id: string; content: string; created_at: string; error?: string; retryCount?: number } | null;
@@ -55,6 +56,7 @@ const TreeView: React.FC<TreeViewProps> = ({
   conversationTree,
   pendingUserMessage,
   onRetrySendMessage
+  ,onRequestDelete
 }) => {
   const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 });
   const [contextMenuMessage, setContextMenuMessage] = useState<Message | null>(null);
@@ -410,6 +412,7 @@ const TreeView: React.FC<TreeViewProps> = ({
           onOpenBranchDialog={handleOpenBranchDialog}
           onOpenRegenBranchDialog={handleOpenRegenBranchDialog}
           onRegenerate={onRegenerate}
+          onRequestDelete={onRequestDelete}
           conversationTree={conversationTree}
         />
       )}

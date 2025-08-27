@@ -119,6 +119,8 @@ const ConversationApp: React.FC = () => {
   }>(null);
   const [showAITyping, setShowAITyping] = useState(false);
   const [editingMessage, setEditingMessage] = useState<null | { id: string; content: string; isLeaf: boolean; isFirst: boolean; originView?: 'chat' | 'tree' }>(null);
+  // Delete confirmation modal state
+  const [deleteRequest, setDeleteRequest] = useState<null | { messageId: string; branchName: string; content: string }>(null);
   const editModalRef = useRef<HTMLDivElement>(null);
 
   // Handle clicking away from the edit modal
@@ -532,6 +534,33 @@ const ConversationApp: React.FC = () => {
     }
   }, [currentConversation, loadConversation, showError]);
 
+  // Delete last user message (UI wiring)
+  const requestDeleteMessage = useCallback((message: { id: string; branch_name: string; content: string }) => {
+    // Only allow deleting user messages from UI
+    setDeleteRequest({ messageId: message.id, branchName: message.branch_name, content: message.content });
+  }, []);
+
+  const confirmDeleteMessage = useCallback(async (messageId: string) => {
+    if (!currentConversation) return;
+    try {
+      const response = await axios.post(`${API_BASE}/conversations/${currentConversation.id}/messages/${messageId}/soft-delete`);
+      console.log('✅ Soft-delete response:', response.data);
+      // Close modal
+      setDeleteRequest(null);
+      // Reload conversation to reflect changes
+      await loadConversation(currentConversation.id);
+      // If branch was deleted, switch to main
+      if (response.data && response.data.branch_deleted) {
+        setCurrentBranch('main');
+        setSelectedMessage(null);
+      }
+    } catch (error: any) {
+      console.error('Failed to soft-delete message:', error.response?.data || error.message || error);
+      showError(error.response?.data?.detail || 'Failed to delete message.');
+      setDeleteRequest(null);
+    }
+  }, [currentConversation, loadConversation, showError]);
+
   const handleMessageSelect = useCallback((messageId: string) => {
     // In tree view, always switch branch if message is from different branch
     // In chat view, only select message without switching branch
@@ -776,6 +805,7 @@ const ConversationApp: React.FC = () => {
                     onDeselectMessage={handleDeselectMessage}
                     selectedMessage={selectedMessage || undefined}
                     conversationTree={conversationTree}
+                    onRequestDelete={requestDeleteMessage}
                   />
                 </div>
               ) : viewMode === 'debug' && debugMode ? (
@@ -797,6 +827,7 @@ const ConversationApp: React.FC = () => {
                   onRegenerate={handleRegenerate}
                   onRenameBranch={handleRenameBranch}
                   onDeselectMessage={handleDeselectMessage}
+                  onRequestDelete={requestDeleteMessage}
                   conversationTree={conversationTree}
                   pendingUserMessage={pendingUserMessage}
                   showAITyping={showAITyping}
@@ -904,6 +935,29 @@ const ConversationApp: React.FC = () => {
               >
                 Go to Home
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Message Confirmation Modal */}
+      {deleteRequest && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <h3>Delete Message</h3>
+            <p>Are you sure you want to delete this user message?</p>
+            <p style={{ fontStyle: 'italic', color: '#333' }}>&ldquo;{deleteRequest.content.substring(0, 200)}&rdquo;</p>
+            <div style={{ marginTop: 12, fontSize: '0.9rem', color: '#666' }}>
+              <p>If it is the last message in its branch the branch may also be removed.</p>
+            </div>
+            <div className="modal-buttons" style={{ marginTop: 16 }}>
+              <button
+                onClick={() => confirmDeleteMessage(deleteRequest.messageId)}
+                style={{ backgroundColor: '#b22222', color: 'white', marginRight: 8 }}
+              >
+                Delete
+              </button>
+              <button onClick={() => setDeleteRequest(null)}>Cancel</button>
             </div>
           </div>
         </div>
