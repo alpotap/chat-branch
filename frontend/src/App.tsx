@@ -119,6 +119,26 @@ const ConversationApp: React.FC = () => {
   }>(null);
   const [showAITyping, setShowAITyping] = useState(false);
   const [editingMessage, setEditingMessage] = useState<null | { id: string; content: string; isLeaf: boolean; isFirst: boolean; }>(null);
+  const editModalRef = useRef<HTMLDivElement>(null);
+
+  // Handle clicking away from the edit modal
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (editModalRef.current && !editModalRef.current.contains(event.target as Node)) {
+        setEditingMessage(null);
+      }
+    };
+
+    if (editingMessage) {
+      document.addEventListener('mousedown', handleClickOutside);
+    } else {
+      document.removeEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [editingMessage]);
 
   // Save state to localStorage (for refreshing purposes)
   useEffect(() => {
@@ -735,6 +755,7 @@ const ConversationApp: React.FC = () => {
                     onSwitchToChatView={handleSwitchToChatView}
                     onCreateBranch={handleCreateBranch}
                     onRegenerate={handleRegenerate}
+                    onBeginEdit={handleBeginEdit}
                     onDeselectMessage={handleDeselectMessage}
                     selectedMessage={selectedMessage || undefined}
                     conversationTree={conversationTree}
@@ -784,7 +805,7 @@ const ConversationApp: React.FC = () => {
       {/* Edit Message Modal */}
       {editingMessage && (
         <div className="modal-overlay">
-          <div className="modal">
+          <div className="modal" ref={editModalRef}>
             <h3>Edit Message</h3>
             <textarea
               value={editingMessage.content}

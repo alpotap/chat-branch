@@ -1,6 +1,7 @@
 import React, { useState, memo, useCallback } from 'react';
 import { getBranchColor as getUtilBranchColor, getBranchColorFromTree, getRandomBranchColor, BRANCH_COLORS } from './utils/branchColors';
 import { generateUniqueBranchName } from './utils/branchNaming';
+import ContextMenu from './components/ContextMenu';
 
 interface Message {
   id: string;
@@ -39,19 +40,30 @@ const MessageBubble = memo<MessageBubbleProps>(({
   error,
   onRetrySendMessage
 }) => {
-  const [showContextMenu, setShowContextMenu] = useState(false);
-  const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 });
-  const [showBranchDialog, setShowBranchDialog] = useState(false);
-  const [showRegenBranchDialog, setShowRegenBranchDialog] = useState(false);
-  const [branchName, setBranchName] = useState('');
   const [regenBranchName, setRegenBranchName] = useState('');
   const [branchColor, setBranchColor] = useState('#3B82F6');
+  // Context menu state (for shared ContextMenu component)
+  const [showContextMenu, setShowContextMenu] = useState(false);
+  const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 });
+  const [contextMenuMessage, setContextMenuMessage] = useState<Message | null>(null);
+
+  // Branch dialog state
+  const [showBranchDialog, setShowBranchDialog] = useState(false);
+  const [branchName, setBranchName] = useState('');
+  const [showRegenBranchDialog, setShowRegenBranchDialog] = useState(false);
+
+  const handleCloseContextMenu = () => {
+    setContextMenuMessage(null);
+    setShowContextMenu(false);
+  };
 
   const handleRightClick = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
+    // Only allow branching from assistant messages via context menu when appropriate
     setContextMenuPos({ x: e.clientX, y: e.clientY });
+    setContextMenuMessage(message);
     setShowContextMenu(true);
-  }, []);
+  }, [message]);
 
   const getDefaultBranchName = (type: 'branch' | 'regen', parentBranchName: string, branches: { name: string }[]) => {
     const suffix = type === 'branch' ? 'branch' : 'regen';
@@ -204,67 +216,19 @@ const MessageBubble = memo<MessageBubbleProps>(({
         </div>
       </div>
 
-      {/* Context Menu */}
-      {showContextMenu && (
-        <>
-          <div 
-            className="context-menu-overlay" 
-            onClick={() => setShowContextMenu(false)}
-          />
-          <div 
-            className="context-menu"
-            style={{ left: contextMenuPos.x, top: contextMenuPos.y }}
-          >
-            {message.role === 'user' && (
-              <button onClick={() => { onBeginEdit(message.id, message.content); setShowContextMenu(false); }}>
-                ✏️ Edit Message
-              </button>
-            )}
-            {message.role === 'assistant' && (
-              <button onClick={handleBranchClick}>
-                🌿 Create Branch Here
-              </button>
-            )}
-            <button onClick={() => { onSelectMessage(message.id); setShowContextMenu(false); }}>
-              📍 Select Message
-            </button>
-            <hr style={{ margin: '4px 0', border: 'none', borderTop: '1px solid #ddd' }} />
-            {message.role === 'assistant' && (
-              canRegenerate() ? (
-                <>
-                  {!isResponseToFirstMessage() && (
-                    <button onClick={handleRegenInBranchClick}>
-                      🔄 Re-generate in New Branch
-                    </button>
-                  )}
-                  <button 
-                    onClick={handleRegenInPlaceClick}
-                    style={{ display: 'flex', alignItems: 'center', gap: '4px' }}
-                    title="Warning: This will replace the current response"
-                  >
-                    ⚠️ Re-generate in Place
-                    <span style={{ fontSize: '12px', color: '#666' }}>ⓘ</span>
-                  </button>
-                </>
-              ) : (
-                <button 
-                  disabled
-                  style={{ 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    gap: '4px',
-                    opacity: 0.5,
-                    cursor: 'not-allowed'
-                  }}
-                  title="Cannot regenerate: This message has follow-up responses or branches"
-                >
-                  🚫 Cannot Regenerate
-                  <span style={{ fontSize: '12px', color: '#666' }}>ⓘ</span>
-                </button>
-              )
-            )}
-          </div>
-        </>
+      {contextMenuMessage && (
+        <ContextMenu
+          message={contextMenuMessage}
+          contextMenuPos={contextMenuPos}
+          onClose={handleCloseContextMenu}
+          onBeginEdit={onBeginEdit}
+          onSelectMessage={onSelectMessage}
+          onBranch={onBranch}
+          onRegenerate={onRegenerate}
+          onOpenBranchDialog={handleBranchClick}
+          onOpenRegenBranchDialog={handleRegenInBranchClick}
+          conversationTree={conversationTree}
+        />
       )}
 
       {/* Branch Creation Dialog */}
