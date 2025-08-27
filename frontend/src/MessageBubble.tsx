@@ -15,10 +15,10 @@ interface Message {
 
 interface MessageBubbleProps {
   message: Message;
-  onBranch: (messageId: string, branchName: string, color?: string) => void;
+  onBranch: (messageId: string, branchName: string, color?: string, switchToChat?: boolean) => void;
   onSelectMessage: (messageId: string) => void;
   onBranchSwitch: (messageId: string) => void;
-  onRegenerate: (messageId: string, type: 'branch' | 'place', branchName?: string) => void;
+  onRegenerate: (messageId: string, type: 'branch' | 'place', branchName?: string, switchToChat?: boolean) => void;
   onBeginEdit: (messageId: string, originalContent: string) => void;
   isSelected: boolean;
   depth: number;
@@ -102,7 +102,7 @@ const MessageBubble = memo<MessageBubbleProps>(({
 
   const handleCreateRegenBranch = useCallback(() => {
     if (regenBranchName.trim()) {
-      onRegenerate(message.id, 'branch', regenBranchName.trim());
+  onRegenerate(message.id, 'branch', regenBranchName.trim(), true);
       setShowRegenBranchDialog(false);
       setRegenBranchName('');
     }

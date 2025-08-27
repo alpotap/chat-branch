@@ -118,7 +118,7 @@ const ConversationApp: React.FC = () => {
     retryCount?: number;
   }>(null);
   const [showAITyping, setShowAITyping] = useState(false);
-  const [editingMessage, setEditingMessage] = useState<null | { id: string; content: string; isLeaf: boolean; isFirst: boolean; }>(null);
+  const [editingMessage, setEditingMessage] = useState<null | { id: string; content: string; isLeaf: boolean; isFirst: boolean; originView?: 'chat' | 'tree' }>(null);
   const editModalRef = useRef<HTMLDivElement>(null);
 
   // Handle clicking away from the edit modal
@@ -463,7 +463,7 @@ const ConversationApp: React.FC = () => {
     await sendUserMessage(pendingUserMessage.content, pendingUserMessage.id, pendingUserMessage.retryCount || 0);
   }, [pendingUserMessage, sendUserMessage]);
 
-  const handleCreateBranch = useCallback(async (messageId: string, branchName: string, color?: string) => {
+  const handleCreateBranch = useCallback(async (messageId: string, branchName: string, color?: string, switchToChat: boolean = true) => {
     if (!currentConversation) return;
 
     try {
@@ -471,8 +471,13 @@ const ConversationApp: React.FC = () => {
       // Immediately update the UI state
       setCurrentBranch(branchName);
       setSelectedMessage(messageId);
-      // Switch to chat view after creating branch for immediate use
-      setViewMode('chat');
+      // Optionally switch to chat view after creating branch for immediate use
+      if (switchToChat) {
+        console.debug('[DEBUG] handleCreateBranch: switchToChat=true -> switching to chat view', { branchName, messageId });
+        setViewMode('chat');
+      } else {
+        console.debug('[DEBUG] handleCreateBranch: switchToChat=false -> staying in current view', { branchName, messageId });
+      }
       // Then reload the conversation to get the updated data
       await loadConversation(currentConversation.id);
     } catch (error: any) {
@@ -481,7 +486,7 @@ const ConversationApp: React.FC = () => {
     }
   }, [currentConversation, createBranch, loadConversation, setSelectedMessage, showError]);
 
-  const handleRegenerate = useCallback(async (messageId: string, type: 'branch' | 'place', branchName?: string) => {
+  const handleRegenerate = useCallback(async (messageId: string, type: 'branch' | 'place', branchName?: string, switchToChat: boolean = true) => {
     if (!currentConversation) return;
 
     try {
@@ -496,9 +501,14 @@ const ConversationApp: React.FC = () => {
         // Reload conversation to get updated data
         await loadConversation(currentConversation.id);
         
-        // Switch to the new branch
-        setCurrentBranch(response.data.branch.name);
-        setViewMode('chat');
+        // Switch to the new branch and optionally switch to chat view
+  setCurrentBranch(response.data.branch.name);
+  if (switchToChat) {
+    console.debug('[DEBUG] handleRegenerate: switchToChat=true -> switching to chat view', { branch: response.data.branch.name, messageId });
+    setViewMode('chat');
+  } else {
+    console.debug('[DEBUG] handleRegenerate: switchToChat=false -> staying in current view', { branch: response.data.branch.name, messageId });
+  }
         
         // Show success message
         console.log(`✅ ${response.data.message}`);
@@ -578,7 +588,8 @@ const ConversationApp: React.FC = () => {
     setCurrentBranch(branchName);
     setSelectedMessage(messageId);
     setIntentionallyDeselected(false); // Reset intentional deselection when switching to chat view
-    setViewMode('chat');
+  console.debug('[DEBUG] handleSwitchToChatView: user action -> switching to chat view', { branchName, messageId });
+  setViewMode('chat');
   }, [setSelectedMessage, saveToHistory, isNavigating]);
 
   const handleBranchChange = useCallback((newBranch: string) => {
@@ -675,15 +686,15 @@ const ConversationApp: React.FC = () => {
     }
   }, [currentConversation, loadConversation, showError]);
 
-  const handleBeginEdit = useCallback((messageId: string, originalContent: string) => {
+  const handleBeginEdit = useCallback((messageId: string, originalContent: string, originView: 'chat' | 'tree' = 'chat') => {
     if (!conversationTree) return;
     const messageNode = conversationTree.messages[messageId];
     const isLeaf = !messageNode || !messageNode.children || messageNode.children.length === 0;
     const isFirst = conversationTree.root_messages.includes(messageId);
-    setEditingMessage({ id: messageId, content: originalContent, isLeaf: isLeaf, isFirst: isFirst });
+    setEditingMessage({ id: messageId, content: originalContent, isLeaf: isLeaf, isFirst: isFirst, originView });
   }, [conversationTree]);
 
-  const handleCommitEdit = useCallback(async (messageId: string, newContent: string, editType: 'in-place' | 'branch') => {
+  const handleCommitEdit = useCallback(async (messageId: string, newContent: string, editType: 'in-place' | 'branch', originView: 'chat' | 'tree' = 'chat') => {
     if (!currentConversation) return;
 
     // Rely on the global axios interceptor to add the token.
@@ -696,10 +707,16 @@ const ConversationApp: React.FC = () => {
         const response = await axios.post(`${API_BASE}/conversations/${currentConversation.id}/messages/${messageId}/edit-as-branch`,
           { content: newContent }
         );
-        // After creating a branch, switch to it
+        // After creating a branch, switch to it; if this edit originated from tree view, remain in tree
         if (response.data && response.data.branch_name) {
           setCurrentBranch(response.data.branch_name);
-          setViewMode('chat');
+          console.debug('[DEBUG] handleCommitEdit: edit-as-branch completed', { originView, branch: response.data.branch_name, newMessageId: response.data.id });
+          if (originView !== 'tree') {
+            console.debug('[DEBUG] handleCommitEdit: origin is not tree -> switching to chat view', { originView });
+            setViewMode('chat');
+          } else {
+            console.debug('[DEBUG] handleCommitEdit: origin is tree -> staying in tree view', { originView });
+          }
           setSelectedMessage(response.data.id);
         }
       }
@@ -815,14 +832,14 @@ const ConversationApp: React.FC = () => {
             />
             <div className="modal-buttons-vertical">
               <button 
-                onClick={() => handleCommitEdit(editingMessage.id, editingMessage.content, 'in-place')}
+                onClick={() => handleCommitEdit(editingMessage.id, editingMessage.content, 'in-place', editingMessage.originView || 'chat')}
                 disabled={!editingMessage.isLeaf}
                 title={editingMessage.isLeaf ? "Replaces the current message. Only for messages with no replies." : "Can only edit the last message of a branch in-place"}
               >
                 ✏️ Save In-place
               </button>
               <button 
-                onClick={() => handleCommitEdit(editingMessage.id, editingMessage.content, 'branch')}
+                onClick={() => handleCommitEdit(editingMessage.id, editingMessage.content, 'branch', editingMessage.originView || 'chat')}
                 disabled={editingMessage.isFirst}
                 title={editingMessage.isFirst ? "Cannot create a branch from the very first message" : "Preserves history by creating a new branch from the previous message."}
               >

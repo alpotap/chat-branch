@@ -19,10 +19,10 @@ interface ChatViewProps {
   messagesPerPage: number;
   showAllMessages: boolean;
   onShowAllMessages: (show: boolean) => void;
-  onBranch: (messageId: string, branchName: string, color?: string) => void;
+  onBranch: (messageId: string, branchName: string, color?: string, switchToChat?: boolean) => void;
   onSelectMessage: (messageId: string) => void;
   onBranchSwitch: (messageId: string) => void;
-  onRegenerate: (messageId: string, type: 'branch' | 'place', branchName?: string) => void;
+  onRegenerate: (messageId: string, type: 'branch' | 'place', branchName?: string, switchToChat?: boolean) => void;
   onRenameBranch: (oldName: string, newName: string) => void;
   onBeginEdit: (messageId: string, originalContent: string) => void;
   onDeselectMessage?: () => void;

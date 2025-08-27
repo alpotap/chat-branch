@@ -1,4 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
+import ReactDOM from 'react-dom';
 import ReactFlow, {
   Node,
   Edge,
@@ -31,9 +32,9 @@ interface TreeViewProps {
   rootMessages: string[];
   onMessageSelect: (messageId: string) => void;
   onSwitchToChatView: (branchName: string, messageId: string) => void;
-  onCreateBranch: (messageId: string, branchName: string, color?: string) => void;
-  onRegenerate?: (messageId: string, type: 'branch' | 'place', branchName?: string) => void;
-  onBeginEdit?: (messageId: string, originalContent: string) => void;
+  onCreateBranch: (messageId: string, branchName: string, color?: string, switchToChat?: boolean) => void;
+  onRegenerate?: (messageId: string, type: 'branch' | 'place', branchName?: string, switchToChat?: boolean) => void;
+  onBeginEdit?: (messageId: string, originalContent: string, originView?: 'chat' | 'tree') => void;
   onDeselectMessage?: () => void;
   selectedMessage?: string;
   conversationTree?: any;
@@ -62,6 +63,9 @@ const TreeView: React.FC<TreeViewProps> = ({
   const [branchName, setBranchName] = useState('');
   const [regenBranchName, setRegenBranchName] = useState('');
   const [branchColor, setBranchColor] = useState('#3B82F6');
+  const [branchDialogSource, setBranchDialogSource] = useState<Message | null>(null);
+  const [regenDialogSource, setRegenDialogSource] = useState<Message | null>(null);
+  const lastActionTimeRef = React.useRef<number | null>(null);
 
   const handleRightClick = useCallback((e: React.MouseEvent, message: Message) => {
     e.preventDefault();
@@ -100,7 +104,8 @@ const TreeView: React.FC<TreeViewProps> = ({
   // Branch dialog handler
   const handleCreateBranch = () => {
     if (branchName.trim() && contextMenuMessage) {
-      onCreateBranch(contextMenuMessage.id, branchName.trim(), branchColor);
+  // When creating a branch from the tree view, don't switch to chat view — keep the user in the tree
+  onCreateBranch(contextMenuMessage.id, branchName.trim(), branchColor, false as any);
       setShowBranchDialog(false);
       setBranchName('');
       setBranchColor('#3B82F6');
@@ -110,6 +115,7 @@ const TreeView: React.FC<TreeViewProps> = ({
 
   // Robust, type-safe node/edge creation
   const { flowNodes, flowEdges } = useMemo(() => {
+  // PERF logging removed to avoid console.errors when time markers mismatch
     const nodes: Node[] = [];
     const edges: Edge[] = [];
     const positions: Record<string, { x: number; y: number }> = {};
@@ -297,6 +303,63 @@ const TreeView: React.FC<TreeViewProps> = ({
     return false;
   }, [contextMenuMessage]);
 
+  // Handlers to open dialogs with sensible defaults (fast)
+  const handleOpenBranchDialog = useCallback((messageId: string) => {
+  const start = Date.now();
+  lastActionTimeRef.current = start;
+  console.debug('[TIMING] handleOpenBranchDialog start', { messageId, ts: start });
+  const msg = messages[messageId] || null;
+  const parentBranchName = msg?.branch_name || 'main';
+  const defaultName = getDefaultBranchName('branch', parentBranchName, conversationTree?.branches || []);
+  setBranchName(defaultName);
+  setBranchColor(getRandomBranchColor());
+  setBranchDialogSource(msg);
+  setShowBranchDialog(true);
+  console.debug('[TIMING] handleOpenBranchDialog end', { messageId, elapsed: Date.now() - start });
+  }, [messages, conversationTree]);
+
+  const handleOpenRegenBranchDialog = useCallback((messageId: string) => {
+    const start = Date.now();
+    lastActionTimeRef.current = start;
+    console.debug('[TIMING] handleOpenRegenBranchDialog start', { messageId, ts: start });
+    const msg = messages[messageId] || null;
+    const parentBranchName = msg?.branch_name || 'main';
+    const defaultName = getDefaultBranchName('regen', parentBranchName, conversationTree?.branches || []);
+    setRegenBranchName(defaultName);
+    setRegenDialogSource(msg);
+    setShowRegenBranchDialog(true);
+    console.debug('[TIMING] handleOpenRegenBranchDialog end', { messageId, elapsed: Date.now() - start });
+  }, [messages, conversationTree]);
+
+  React.useEffect(() => {
+    if (showBranchDialog && lastActionTimeRef.current) {
+      const now = Date.now();
+      console.debug('[TIMING] branch dialog visible after (ms):', now - lastActionTimeRef.current);
+    }
+  }, [showBranchDialog]);
+
+  React.useEffect(() => {
+    if (showRegenBranchDialog && lastActionTimeRef.current) {
+      const now = Date.now();
+      console.debug('[TIMING] regen dialog visible after (ms):', now - lastActionTimeRef.current);
+    }
+  }, [showRegenBranchDialog]);
+
+  // Lightweight portal modal to decouple from ReactFlow rendering
+  const PortalModal: React.FC<{ onClose: () => void; children: React.ReactNode }> = ({ onClose, children }) => {
+    if (typeof document === 'undefined') return null;
+    return ReactDOM.createPortal(
+      (
+        <div className="modal-overlay" onClick={onClose}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            {children}
+          </div>
+        </div>
+      ),
+      document.body
+    );
+  };
+
   // Regeneration dialog handlers
   const handleRegenInPlace = useCallback(() => {
     if (contextMenuMessage && onRegenerate) {
@@ -307,11 +370,12 @@ const TreeView: React.FC<TreeViewProps> = ({
 
   const handleRegenInBranch = useCallback(() => {
     if (contextMenuMessage && onRegenerate) {
-      onRegenerate(contextMenuMessage.id, 'branch', regenBranchName.trim());
-      setShowRegenBranchDialog(false);
-      setRegenBranchName('');
-      setContextMenuMessage(null);
-    }
+        // When regen is triggered from the tree view, keep the user in the tree (do not switch to chat)
+        onRegenerate(contextMenuMessage.id, 'branch', regenBranchName.trim(), false);
+        setShowRegenBranchDialog(false);
+        setRegenBranchName('');
+        setContextMenuMessage(null);
+      }
   }, [contextMenuMessage, onRegenerate, regenBranchName]);
 
   // Render
@@ -340,155 +404,141 @@ const TreeView: React.FC<TreeViewProps> = ({
           }}
           contextMenuPos={contextMenuPos}
           onClose={handleCloseContextMenu}
-          onBeginEdit={onBeginEdit}
+          onBeginEdit={(messageId: string, originalContent: string) => onBeginEdit && onBeginEdit(messageId, originalContent, 'tree')}
           onSelectMessage={onMessageSelect}
           onBranch={onCreateBranch}
-          onOpenBranchDialog={(messageId: string) => {
-            setShowBranchDialog(true);
-            setContextMenuMessage(messages[messageId] || null);
-          }}
-          onOpenRegenBranchDialog={(messageId: string) => {
-            setShowRegenBranchDialog(true);
-            setContextMenuMessage(messages[messageId] || null);
-          }}
+          onOpenBranchDialog={handleOpenBranchDialog}
+          onOpenRegenBranchDialog={handleOpenRegenBranchDialog}
           onRegenerate={onRegenerate}
           conversationTree={conversationTree}
         />
       )}
       {/* Branch Creation Dialog */}
-      {showBranchDialog && contextMenuMessage && (
-        <div className="modal-overlay" style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0,0,0,0.5)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1002
-        }}>
-          <div className="modal" style={{
-            background: 'white',
-            padding: '24px',
-            borderRadius: '8px',
-            minWidth: '400px',
-            maxWidth: '600px'
-          }}>
-            <h3>Create New Branch</h3>
-            <p>Branching from: "{contextMenuMessage.content.substring(0, 50)}..."</p>
-            <input
-              type="text"
-              placeholder="Enter branch name"
-              value={branchName}
-              onChange={(e) => setBranchName(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && handleCreateBranch()}
-              autoFocus
-              autoComplete="off"
-              data-1p-ignore="true"
-              data-lpignore="true"
-              style={{
-                width: '100%',
-                padding: '8px',
-                marginBottom: '16px',
-                border: '1px solid #ccc',
-                borderRadius: '4px'
-              }}
-            />
-            <div className="color-selection" style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>Branch Color:</label>
-              <div className="color-options" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <input
-                  type="color"
-                  value={branchColor}
-                  onChange={(e) => setBranchColor(e.target.value)}
-                  className="color-picker"
-                  style={{
-                    width: '40px',
-                    height: '40px',
-                    border: 'none',
-                    borderRadius: '8px',
-                    cursor: 'pointer'
-                  }}
-                />
-                <div className="color-presets" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                  {BRANCH_COLORS.presets.map(color => (
-                    <button
-                      key={color}
-                      className={`color-preset ${branchColor === color ? 'selected' : ''}`}
-                      style={{
-                        backgroundColor: color,
-                        width: '32px',
-                        height: '32px',
-                        border: branchColor === color ? '3px solid #000' : '2px solid #ccc',
-                        borderRadius: '8px',
-                        cursor: 'pointer',
-                        transition: 'border 0.2s'
-                      }}
-                      onClick={() => setBranchColor(color)}
-                      title={color}
-                    />
-                  ))}
-                </div>
+      {showBranchDialog && branchDialogSource && (
+        <PortalModal onClose={() => { setShowBranchDialog(false); setBranchName(''); setBranchDialogSource(null); }}>
+          <h3>Create New Branch</h3>
+          <p>Branching from: "{branchDialogSource?.content.substring(0, 50)}..."</p>
+          <input
+            type="text"
+            placeholder="Enter branch name"
+            value={branchName}
+            onChange={(e) => setBranchName(e.target.value)}
+            onKeyPress={(e) => e.key === 'Enter' && handleCreateBranch()}
+            autoFocus
+            autoComplete="off"
+            data-1p-ignore="true"
+            data-lpignore="true"
+            style={{
+              width: '100%',
+              padding: '8px',
+              marginBottom: '16px',
+              border: '1px solid #ccc',
+              borderRadius: '4px'
+            }}
+          />
+          <div className="color-selection" style={{ marginBottom: '16px' }}>
+            <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>Branch Color:</label>
+            <div className="color-options" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <input
+                type="color"
+                value={branchColor}
+                onChange={(e) => setBranchColor(e.target.value)}
+                className="color-picker"
+                style={{
+                  width: '40px',
+                  height: '40px',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer'
+                }}
+              />
+              <div className="color-presets" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                {BRANCH_COLORS.presets.map(color => (
+                  <button
+                    key={color}
+                    className={`color-preset ${branchColor === color ? 'selected' : ''}`}
+                    style={{
+                      backgroundColor: color,
+                      width: '32px',
+                      height: '32px',
+                      border: branchColor === color ? '3px solid #000' : '2px solid #ccc',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      transition: 'border 0.2s'
+                    }}
+                    onClick={() => setBranchColor(color)}
+                    title={color}
+                  />
+                ))}
               </div>
-              <p style={{ fontSize: '0.8rem', color: '#666', marginTop: '8px' }}>
-                Current color: <span style={{ backgroundColor: branchColor, padding: '2px 8px', borderRadius: '4px', color: 'white' }}>{branchColor}</span>
-              </p>
             </div>
-            <div className="modal-buttons">
-              <button
-                onClick={handleCreateBranch}
-                disabled={!branchName.trim()}
-                style={{ marginRight: '8px' }}
-              >
-                Create Branch
-              </button>
-              <button onClick={() => {
+            <p style={{ fontSize: '0.8rem', color: '#666', marginTop: '8px' }}>
+              Current color: <span style={{ backgroundColor: branchColor, padding: '2px 8px', borderRadius: '4px', color: 'white' }}>{branchColor}</span>
+            </p>
+          </div>
+          <div className="modal-buttons">
+            <button
+              onClick={() => {
+                const src = branchDialogSource || contextMenuMessage;
+                if (src) onCreateBranch && onCreateBranch(src.id, branchName.trim(), branchColor, false);
                 setShowBranchDialog(false);
                 setBranchName('');
-                setContextMenuMessage(null);
-              }}>
-                Cancel
-              </button>
-            </div>
+                setBranchDialogSource(null);
+              }}
+              disabled={!branchName.trim()}
+              style={{ marginRight: '8px' }}
+            >
+              Create Branch
+            </button>
+            <button onClick={() => {
+              setShowBranchDialog(false);
+              setBranchName('');
+              setBranchDialogSource(null);
+            }}>
+              Cancel
+            </button>
           </div>
-        </div>
+        </PortalModal>
       )}
       {/* Regeneration Branch Dialog */}
-      {showRegenBranchDialog && contextMenuMessage && (
-        <div className="modal-overlay">
-          <div className="modal">
-            <h3>Re-generate in New Branch</h3>
-            <p>Re-generating: "{contextMenuMessage.content.substring(0, 50)}..."</p>
-            <input
-              type="text"
-              placeholder="Enter branch name for regeneration"
-              value={regenBranchName}
-              onChange={(e) => setRegenBranchName(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && handleRegenInBranch()}
-              autoFocus
-              autoComplete="off"
-              data-1p-ignore="true"
-              data-lpignore="true"
-            />
-            <div className="modal-buttons">
-              <button
-                onClick={handleRegenInBranch}
-                disabled={!regenBranchName.trim()}
-                style={{ marginRight: '8px' }}
-              >
-                Re-generate
-              </button>
-              <button onClick={() => {
+      {showRegenBranchDialog && regenDialogSource && (
+        <PortalModal onClose={() => { setShowRegenBranchDialog(false); setRegenBranchName(''); setRegenDialogSource(null); }}>
+          <h3>Re-generate in New Branch</h3>
+          <p>Re-generating: "{regenDialogSource?.content.substring(0, 50)}..."</p>
+          <input
+            type="text"
+            placeholder="Enter branch name for regeneration"
+            value={regenBranchName}
+            onChange={(e) => setRegenBranchName(e.target.value)}
+            onKeyPress={(e) => e.key === 'Enter' && handleRegenInBranch()}
+            autoFocus
+            autoComplete="off"
+            data-1p-ignore="true"
+            data-lpignore="true"
+          />
+          <div className="modal-buttons">
+            <button
+              onClick={() => {
+                const src = regenDialogSource || contextMenuMessage;
+                if (src && onRegenerate) onRegenerate(src.id, 'branch', regenBranchName.trim(), false);
                 setShowRegenBranchDialog(false);
                 setRegenBranchName('');
-              }}>
-                Cancel
-              </button>
-            </div>
+                setRegenDialogSource(null);
+              }}
+              disabled={!regenBranchName.trim()}
+              style={{ marginRight: '8px' }}
+            >
+              Re-generate
+            </button>
+            <button onClick={() => {
+              setShowRegenBranchDialog(false);
+              setRegenBranchName('');
+              setRegenDialogSource(null);
+            }}>
+              Cancel
+            </button>
           </div>
-        </div>
+        </PortalModal>
       )}
     </div>
   );

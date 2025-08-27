@@ -14,13 +14,13 @@ interface ContextMenuProps {
   message: Message;
   contextMenuPos: { x: number; y: number };
   onClose: () => void;
-  onBeginEdit?: (messageId: string, originalContent: string) => void;
+  onBeginEdit?: (messageId: string, originalContent: string, originView?: 'chat' | 'tree') => void;
   onSelectMessage?: (messageId: string) => void;
-  onBranch?: (messageId: string, branchName: string, color?: string) => void;
+  onBranch?: (messageId: string, branchName: string, color?: string, switchToChat?: boolean) => void;
   // Optional callbacks to request the consumer open a branch/regen dialog
   onOpenBranchDialog?: (messageId: string) => void;
   onOpenRegenBranchDialog?: (messageId: string) => void;
-  onRegenerate?: (messageId: string, type: 'branch' | 'place', branchName?: string) => void;
+  onRegenerate?: (messageId: string, type: 'branch' | 'place', branchName?: string, switchToChat?: boolean) => void;
   conversationTree?: any;
 }
 
