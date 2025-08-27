@@ -24,6 +24,10 @@ from app.schemas import (
 )
 from app.services import ConversationService, LLMService, AuthService
 from app.auth import verify_token
+import litellm
+
+# Enable verbose logging for LiteLLM
+litellm.set_verbose = True
 
 # Create tables
 Base.metadata.create_all(bind=engine)

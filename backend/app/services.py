@@ -873,7 +873,6 @@ class LLMService:
                 model=mapped_model,
                 messages=formatted_context,
                 temperature=0.7,
-                max_tokens=1000
             )
             return response.choices[0].message.content
         except Exception as e:
@@ -907,22 +906,6 @@ class LLMService:
         has_anthropic = bool(os.getenv("ANTHROPIC_API_KEY"))
         
         return has_openai or has_anthropic
-    
-    async def _generate_real_response(self, context: List[Dict], model: str) -> str:
-        """Generate real AI response using LiteLLM"""
-        try:
-            response = await litellm.acompletion(
-                model=model,
-                messages=context,
-                temperature=0.7,
-                max_tokens=1000
-            )
-            return response.choices[0].message.content
-            
-        except Exception as e:
-            print(f"❌ Error with real LLM call: {e}")
-            # Fallback to dummy response if real LLM fails
-            return await self._generate_dummy_response(context, model, error_fallback=True)
     
     async def _generate_dummy_response(self, context: List[Dict], model: str, error_fallback: bool = False) -> str:
         """Generate dummy AI response for testing"""
