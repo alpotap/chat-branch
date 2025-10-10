@@ -19,13 +19,18 @@ interface ChatViewProps {
   messagesPerPage: number;
   showAllMessages: boolean;
   onShowAllMessages: (show: boolean) => void;
-  onBranch: (messageId: string, branchName: string, color?: string) => void;
+  onBranch: (messageId: string, branchName: string, color?: string, switchToChat?: boolean) => void;
   onSelectMessage: (messageId: string) => void;
   onBranchSwitch: (messageId: string) => void;
-  onRegenerate: (messageId: string, type: 'branch' | 'place', branchName?: string) => void;
+  onRegenerate: (messageId: string, type: 'branch' | 'place', branchName?: string, switchToChat?: boolean) => void;
   onRenameBranch: (oldName: string, newName: string) => void;
+  onBeginEdit: (messageId: string, originalContent: string) => void;
+  onRequestDelete?: (message: Message) => void;
   onDeselectMessage?: () => void;
   conversationTree: any;
+  pendingUserMessage?: { id: string; content: string; created_at: string; error?: string; retryCount?: number } | null;
+  showAITyping?: boolean;
+  onRetrySendMessage?: () => void;
 }
 
 const ChatView = memo(({
@@ -42,7 +47,12 @@ const ChatView = memo(({
   onRegenerate,
   onRenameBranch,
   onDeselectMessage,
-  conversationTree
+  onRequestDelete,
+  conversationTree,
+  pendingUserMessage,
+  showAITyping,
+  onRetrySendMessage,
+  onBeginEdit
 }: ChatViewProps) => {
   const [isRenamingBranch, setIsRenamingBranch] = useState(false);
   const [newBranchName, setNewBranchName] = useState('');
@@ -110,6 +120,7 @@ const ChatView = memo(({
       </div>
       
       <div className="messages" onClick={handleContainerClick}>
+        {/* Render all normal messages */}
         {paginatedMessages.map((message) => (
           <MessageBubble
             key={message.id}
@@ -118,11 +129,49 @@ const ChatView = memo(({
             onSelectMessage={onSelectMessage}
             onBranchSwitch={onBranchSwitch}
             onRegenerate={onRegenerate}
+            onBeginEdit={onBeginEdit}
+                      onRequestDelete={onRequestDelete}
             isSelected={selectedMessage === message.id}
             depth={0}
             conversationTree={conversationTree}
           />
         ))}
+        {/* Optimistic user message (pending) */}
+        {pendingUserMessage && (
+          <MessageBubble
+            key={pendingUserMessage.id}
+            message={{
+              id: pendingUserMessage.id,
+              content: pendingUserMessage.content,
+              role: 'user',
+              branch_name: currentBranch,
+              created_at: pendingUserMessage.created_at,
+              children: [],
+            }}
+            onBranch={onBranch}
+            onSelectMessage={onSelectMessage}
+            onBranchSwitch={onBranchSwitch}
+            onRegenerate={onRegenerate}
+            onBeginEdit={() => {}} // No-op for pending messages
+            isSelected={false}
+            depth={0}
+            conversationTree={conversationTree}
+            error={pendingUserMessage.error}
+            onRetrySendMessage={onRetrySendMessage}
+          />
+        )}
+        {/* AI is typing indicator */}
+        {showAITyping && (
+          <div className="message-bubble assistant typing-indicator" style={{ marginLeft: 0, borderLeft: '4px solid #a0aec0', opacity: 0.7 }}>
+            <div className="message-header">
+              <span className="role">assistant</span>
+              <span className="branch-tag" style={{ backgroundColor: '#a0aec0' }}>{currentBranch}</span>
+              <span className="model">...</span>
+              <span className="time">AI is typing...</span>
+            </div>
+            <div className="content"><em>AI is typing...</em></div>
+          </div>
+        )}
       </div>
 
       {/* Show more / less button */}

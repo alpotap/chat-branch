@@ -1074,3 +1074,68 @@
   transform: translateY(-1px);
   box-shadow: 0 2px 8px rgba(220, 53, 69, 0.3);
 }
+
+/* Edit Modal Styles */
+.edit-textarea {
+  width: 100%;
+  min-height: 200px; /* Increased height */
+  box-sizing: border-box;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 0.75rem;
+  font-family: inherit;
+  font-size: 1rem;
+  line-height: 1.5;
+  margin-bottom: 1rem;
+  resize: vertical;
+}
+
+.modal-buttons-vertical {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.modal-buttons-vertical button {
+  padding: 0.75rem 1rem;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  background-color: #f8f9fa;
+}
+
+.modal-buttons-vertical button:not(:disabled):hover {
+  border-color: #667eea;
+  background-color: #f0f2ff;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.modal-buttons-vertical button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background-color: #e9ecef;
+}
+
+.modal-buttons-vertical button .button-subtitle {
+  font-size: 0.8rem;
+  color: #666;
+  font-weight: normal;
+  margin-top: 0.25rem;
+}
+
+.modal-buttons-vertical button.cancel-button {
+  background-color: #6c757d;
+  color: white;
+  text-align: center;
+  margin-top: 0.5rem;
+  border: none;
+}
+
+.modal-buttons-vertical button.cancel-button:hover {
+  background-color: #5a6268;
+}

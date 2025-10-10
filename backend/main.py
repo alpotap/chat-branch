@@ -12,7 +12,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from typing import List, Optional
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.database import get_db, engine
 from app.models import Base, Conversation, Message, Branch, User
@@ -24,6 +24,10 @@ from app.schemas import (
 )
 from app.services import ConversationService, LLMService, AuthService
 from app.auth import verify_token
+import litellm
+
+# Enable verbose logging for LiteLLM
+litellm.set_verbose = True
 
 # Create tables
 Base.metadata.create_all(bind=engine)
@@ -228,61 +232,69 @@ async def add_message(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Add a message to a conversation"""
-    # Check if conversation exists and belongs to user
+    """Add a message to a conversation. If the message is from a user, it also generates and saves an AI response."""
     conversation = conversation_service.get_conversation(db, conversation_id, current_user.id)
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversation not found")
+
+    # If the message is not from a user, save it directly (e.g., system message)
+    if message.role != "user":
+        db_message = conversation_service.add_message(db, conversation_id, message, current_user.id)
+        return MessageResponse.from_orm(db_message)
+
+    # --- Transactional User Message and AI Response ---
     
-    # Add user message
-    db_message = conversation_service.add_message(db, conversation_id, message, current_user.id)
-    
-    # Generate AI response if user message
-    if message.role == "user":
-        # Get conversation context for AI (entire branch history)
-        context = conversation_service.get_message_context(
-            db, 
-            conversation_id, 
-            message.branch_name, 
-            current_user.id
-            # Don't pass parent_message_id - we want full branch context
-        )
-        
-        # Generate AI response
-        ai_response = await llm_service.generate_response(
-            context, 
-            model=message.llm_model or "gpt-3.5-turbo"
-        )
-        
-        # Save AI response
-        ai_message = MessageCreate(
-            content=ai_response,
-            role="assistant",
-            parent_id=str(db_message.id),  # Convert UUID to string
-            branch_name=message.branch_name,
-            llm_model=message.llm_model or "gpt-3.5-turbo"
-        )
-        
-        ai_db_message = conversation_service.add_message(db, conversation_id, ai_message, current_user.id)
-        return MessageResponse(
-            id=str(ai_db_message.id),
-            content=ai_db_message.content,
-            role=ai_db_message.role,
-            parent_id=str(ai_db_message.parent_id) if ai_db_message.parent_id else None,
-            branch_name=ai_db_message.branch_name,
-            llm_model=ai_db_message.llm_model,
-            created_at=ai_db_message.created_at
-        )
-    
-    return MessageResponse(
-        id=str(db_message.id),
-        content=db_message.content,
-        role=db_message.role,
-        parent_id=str(db_message.parent_id) if db_message.parent_id else None,
-        branch_name=db_message.branch_name,
-        llm_model=db_message.llm_model,
-        created_at=db_message.created_at
+    # 1. Get conversation context BEFORE adding the new user message
+    context = conversation_service.get_message_context(
+        db,
+        conversation_id,
+        message.branch_name,
+        current_user.id
     )
+    
+    # 2. Append the new user message to the context in memory
+    context.append({"role": "user", "content": message.content})
+    
+    # 3. Generate AI response
+    try:
+        ai_response_content = await llm_service.generate_response(
+            context,
+            model=message.llm_model
+        )
+        
+        # Handle empty or error-like responses from the LLM service
+        if not ai_response_content or ai_response_content.strip() == "" or ai_response_content.strip().lower().startswith("error"):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="The AI model failed to generate a valid response."
+            )
+
+    except Exception as e:
+        # If it's already an HTTPException, re-raise it. Otherwise, wrap it.
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"An error occurred with the AI service: {str(e)}"
+        )
+
+    # 4. Save both user and AI messages in a single transaction
+    try:
+        ai_db_message = conversation_service.add_user_and_ai_messages_transactional(
+            db=db,
+            conversation_id=conversation_id,
+            user_message=message,
+            ai_response_content=ai_response_content,
+            user_id=current_user.id
+        )
+        return MessageResponse.from_orm(ai_db_message)
+    except Exception as e:
+        # This would catch database errors during the transaction
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to save messages to the database: {str(e)}"
+        )
 
 @app.post("/conversations/{conversation_id}/branch", response_model=BranchResponse)
 async def create_branch(
@@ -602,23 +614,15 @@ async def regenerate_message_in_place(
             context,
             llm_model
         )
-        
+
         # Update the existing AI message content instead of deleting and recreating
         ai_message.content = ai_response
-        ai_message.created_at = datetime.utcnow()  # Update timestamp
+        ai_message.created_at = datetime.now(timezone.utc)  # Update timestamp
         db.commit()
         db.refresh(ai_message)
-        
-        return MessageResponse(
-            id=str(ai_message.id),
-            content=ai_message.content,
-            role=ai_message.role,
-            parent_id=str(ai_message.parent_id) if ai_message.parent_id else None,
-            branch_name=ai_message.branch_name,
-            llm_model=ai_message.llm_model,
-            created_at=ai_message.created_at
-        )
-        
+
+        return MessageResponse.from_orm(ai_message)
+
     except ValueError as e:
         print(f"❌ In-place regeneration validation error: {str(e)}")
         raise HTTPException(status_code=400, detail="Unable to regenerate this message. Please try regenerating the most recent message in the conversation.")
@@ -628,6 +632,83 @@ async def regenerate_message_in_place(
         traceback.print_exc()
         raise HTTPException(status_code=500, detail="An error occurred while regenerating the message. Please try again.")
 
+@app.put("/conversations/{conversation_id}/messages/{message_id}", response_model=MessageResponse)
+async def edit_message_in_place(
+    conversation_id: str,
+    message_id: str,
+    request: dict, # Expects {"content": "new content"}
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Edit a user message in-place, only if it is a leaf node."""
+    new_content = request.get("content")
+    if not new_content:
+        raise HTTPException(status_code=400, detail="New content not provided.")
+    try:
+        updated_message = conversation_service.edit_message_in_place(
+            db, conversation_id, message_id, new_content, current_user.id
+        )
+        return MessageResponse.from_orm(updated_message)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/conversations/{conversation_id}/messages/{message_id}/edit-as-branch", response_model=MessageResponse)
+async def edit_message_as_branch(
+    conversation_id: str,
+    message_id: str,
+    request: dict, # Expects {"content": "new content"}
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Edit a user message by creating a new branch from its parent."""
+    new_content = request.get("content")
+    if not new_content:
+        raise HTTPException(status_code=400, detail="New content not provided.")
+
+    try:
+        # 1. Create the new branch and get parameters for the new message
+        params = conversation_service.edit_message_as_branch(
+            db, conversation_id, message_id, current_user.id
+        )
+        
+        # 2. Create the new message object for the API
+        new_message_create = MessageCreate(
+            content=new_content,
+            role="user",
+            parent_id=params["parent_id"],
+            branch_name=params["branch_name"],
+            llm_model=params["llm_model"]
+        )
+
+        # 3. Get context and generate AI response
+        context = conversation_service.get_message_context(
+            db, conversation_id, new_message_create.branch_name, current_user.id
+        )
+        context.append({"role": "user", "content": new_message_create.content})
+
+        ai_response_content = await llm_service.generate_response(context, model=new_message_create.llm_model)
+        if not ai_response_content or ai_response_content.strip() == "":
+             raise HTTPException(status_code=503, detail="AI failed to generate a valid response.")
+
+        # 4. Save both messages transactionally
+        ai_db_message = conversation_service.add_user_and_ai_messages_transactional(
+            db=db,
+            conversation_id=conversation_id,
+            user_message=new_message_create,
+            ai_response_content=ai_response_content,
+            user_id=current_user.id
+        )
+        return MessageResponse.from_orm(ai_db_message)
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        db.rollback()
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {str(e)}")
+
+
 @app.get("/conversations/{conversation_id}/debug")
 async def debug_conversation(
     conversation_id: str,
@@ -636,6 +717,39 @@ async def debug_conversation(
     """Debug conversation integrity issues"""
     diagnostics = conversation_service.validate_conversation_integrity(db, conversation_id)
     return diagnostics
+
+
+@app.post("/conversations/{conversation_id}/messages/{message_id}/soft-delete")
+async def soft_delete_message(
+    conversation_id: str,
+    message_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Soft-delete the last user message in a branch (and optionally the branch).
+
+    Rules enforced by service:
+    - Only user messages may be deleted
+    - Message must be active and must be a leaf (no active children)
+    - If it is the only active message in a non-main branch, the branch is soft-deleted
+    """
+    try:
+        # Validate conversation exists and belongs to user
+        conversation = conversation_service.get_conversation(db, conversation_id, current_user.id)
+        if not conversation:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+        result = conversation_service.soft_delete_last_user_message(db, conversation_id, message_id, current_user.id)
+
+        # Return the service result directly so clients can read deleted_ids at top-level
+        return result
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail="Failed to soft-delete message")
 
 @app.post("/conversations/{conversation_id}/fix")
 async def fix_conversation(

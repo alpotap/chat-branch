@@ -64,6 +64,7 @@ class Branch(Base):
     created_from_message_id = Column(String(36), ForeignKey("messages.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     color = Column(String(7), default="#3B82F6")  # hex color for UI
+    is_active = Column(Boolean, default=True)
     
     # Relationships
     user = relationship("User")
