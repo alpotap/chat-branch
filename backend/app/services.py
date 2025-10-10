@@ -361,7 +361,8 @@ class ConversationService:
         
         return db.query(Branch).filter(
             Branch.conversation_id == conversation_id,
-            Branch.user_id == user_id
+            Branch.user_id == user_id,
+            Branch.is_active == True
         ).all()
     
     def get_dependent_branches(self, db: Session, conversation_id: str, branch_name: str, user_id: str) -> List[str]:
@@ -574,6 +575,7 @@ class ConversationService:
             db.add(msg)
 
             branch_deleted = False
+            deleted_ids = [str(msg.id)]
 
             # If we're deleting an assistant child together with the user message, soft-delete it too
             if assistant_child is not None and assistant_child.is_active:
@@ -581,6 +583,7 @@ class ConversationService:
                 db.add(assistant_child)
                 # Adjust the active messages count to reflect both deletions
                 active_messages_in_branch -= 1
+                deleted_ids.append(str(assistant_child.id))
 
             # If this was the only active message in the branch and branch != main, soft-delete the branch
             if active_messages_in_branch <= 1 and branch_name != "main":
@@ -596,7 +599,7 @@ class ConversationService:
                     branch_deleted = True
 
             db.commit()
-            return {"message_id": message_id, "branch_name": branch_name, "branch_deleted": branch_deleted}
+            return {"deleted_ids": deleted_ids, "message_id": message_id, "branch_name": branch_name, "branch_deleted": branch_deleted}
         except Exception:
             db.rollback()
             raise
@@ -736,10 +739,11 @@ class ConversationService:
         if not conversation:
             raise ValueError("Conversation not found or does not belong to user")
         
-        # Get all messages for this specific conversation and user
+        # Get all ACTIVE messages for this specific conversation and user
         messages = db.query(Message).filter(
             Message.conversation_id == conversation_id,
-            Message.user_id == user_id
+            Message.user_id == user_id,
+            Message.is_active == True
         ).all()
         
         # Debug logging

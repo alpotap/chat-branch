@@ -11,6 +11,7 @@ import EmptyState from './components/EmptyState';
 import LoginPage from './components/LoginPage';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { useConversations } from './hooks/useConversations';
+import useOptimisticDeletes from './hooks/useOptimisticDeletes';
 import { useMessages } from './hooks/useMessages';
 import { useBranchMessages } from './hooks/useBranchMessages';
 import './App.css';
@@ -62,6 +63,8 @@ const ConversationApp: React.FC = () => {
   // Message queue to prevent race conditions
   // Simple lock to prevent race conditions - much more reliable than complex queue
   const sendingLockRef = useRef(false);
+  // Lock to prevent sending while a delete is being finalized
+  const deletingRef = useRef(false);
   
   // Error modal state
   const [showErrorModal, setShowErrorModal] = useState(false);
@@ -80,7 +83,8 @@ const ConversationApp: React.FC = () => {
     deleteConversation,
     renameConversation,
     renameBranch,
-    deleteBranch
+    deleteBranch,
+    setConversationTree
   } = useConversations();
 
   const {
@@ -107,6 +111,7 @@ const ConversationApp: React.FC = () => {
     messagesPerPage,
     conversationTree  // Pass the entire conversationTree for branch metadata
   );
+
 
   // --- Optimistic UI state for pending user message and AI typing ---
   // pendingUserMessage now tracks error and retry state
@@ -321,6 +326,22 @@ const ConversationApp: React.FC = () => {
     setShowErrorModal(true);
   }, []);
 
+  // instantiate optimistic delete hook (after showError is defined)
+  const { requestDelete, isDeleting } = useOptimisticDeletes({
+    currentConversationId: currentConversation?.id,
+    conversationTree,
+    setConversationTree,
+    setCurrentBranch,
+    setSelectedMessage,
+    showError,
+    loadConversation
+  });
+
+  // Keep the deletingRef in sync with hook state so send flow can block while deleting
+  useEffect(() => {
+    deletingRef.current = !!isDeleting;
+  }, [isDeleting]);
+
   const handleCreateConversation = useCallback(async (title?: string) => {
     console.log('🔧 Creating new conversation...');
     try {
@@ -374,6 +395,10 @@ const ConversationApp: React.FC = () => {
   // Helper to send a message (used for both send and retry)
   const sendUserMessage = useCallback(async (messageText: string, tempId: string, retryCount = 0) => {
     if (!currentConversation) return;
+    if (deletingRef.current) {
+      showError('Please wait for pending delete to complete before sending a new message.');
+      return false;
+    }
     setShowAITyping(true);
     setLoading(true);
     // Prevent duplicate sends: if a user message with same content and timestamp exists in current branch, do not send
@@ -543,23 +568,14 @@ const ConversationApp: React.FC = () => {
   const confirmDeleteMessage = useCallback(async (messageId: string) => {
     if (!currentConversation) return;
     try {
-      const response = await axios.post(`${API_BASE}/conversations/${currentConversation.id}/messages/${messageId}/soft-delete`);
-      console.log('✅ Soft-delete response:', response.data);
-      // Close modal
-      setDeleteRequest(null);
-      // Reload conversation to reflect changes
-      await loadConversation(currentConversation.id);
-      // If branch was deleted, switch to main
-      if (response.data && response.data.branch_deleted) {
-        setCurrentBranch('main');
-        setSelectedMessage(null);
-      }
-    } catch (error: any) {
-      console.error('Failed to soft-delete message:', error.response?.data || error.message || error);
-      showError(error.response?.data?.detail || 'Failed to delete message.');
-      setDeleteRequest(null);
+      await requestDelete(messageId, deleteRequest?.branchName, deleteRequest?.content);
+    } catch (err) {
+      // error already shown by hook
     }
-  }, [currentConversation, loadConversation, showError]);
+    setDeleteRequest(null);
+  }, [currentConversation, requestDelete, deleteRequest]);
+
+  
 
   const handleMessageSelect = useCallback((messageId: string) => {
     // In tree view, always switch branch if message is from different branch
@@ -962,6 +978,8 @@ const ConversationApp: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Deletion is server-canonical; no Undo toast shown to avoid reappearance issues */}
     </div>
   );
 };

@@ -741,7 +741,8 @@ async def soft_delete_message(
 
         result = conversation_service.soft_delete_last_user_message(db, conversation_id, message_id, current_user.id)
 
-        return {"success": True, "result": result}
+        # Return the service result directly so clients can read deleted_ids at top-level
+        return result
 
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

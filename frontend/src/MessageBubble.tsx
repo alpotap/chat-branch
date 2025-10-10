@@ -186,6 +186,16 @@ const MessageBubble = memo<MessageBubbleProps>(({
           >
             {message.branch_name}
           </span>
+          {/* Inline delete button for chat view parity */}
+          {onRequestDelete && message.role === 'user' && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onRequestDelete(message); }}
+              title="Delete message"
+              style={{ marginLeft: 8, background: 'transparent', border: 'none', color: '#b22222', cursor: 'pointer' }}
+            >
+              🗑️
+            </button>
+          )}
           {message.llm_model && <span className="model">{message.llm_model}</span>}
           <span className="time">
             {new Date(message.created_at).toLocaleTimeString()}
