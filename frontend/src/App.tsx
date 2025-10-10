@@ -11,11 +11,13 @@ import EmptyState from './components/EmptyState';
 import LoginPage from './components/LoginPage';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { useConversations } from './hooks/useConversations';
+import useOptimisticDeletes from './hooks/useOptimisticDeletes';
 import { useMessages } from './hooks/useMessages';
 import { useBranchMessages } from './hooks/useBranchMessages';
 import './App.css';
 
 const API_BASE = process.env.REACT_APP_API_BASE || '/api';
+const DEFAULT_MODEL = 'gemini-2.5-flash';
 
 // Simple undo/redo state for within-conversation navigation
 interface ViewState {
@@ -36,7 +38,7 @@ const ConversationApp: React.FC = () => {
   const { conversationId } = useParams<{ conversationId: string }>();
   const navigate = useNavigate();
   const [currentBranch, setCurrentBranch] = useState<string>('main');
-  const [selectedModel, setSelectedModel] = useState('gpt-3.5-turbo');
+  const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL);
   
   // Get initial view mode from localStorage or default to 'chat'
   const getInitialViewMode = (): 'chat' | 'tree' | 'debug' => {
@@ -61,6 +63,8 @@ const ConversationApp: React.FC = () => {
   // Message queue to prevent race conditions
   // Simple lock to prevent race conditions - much more reliable than complex queue
   const sendingLockRef = useRef(false);
+  // Lock to prevent sending while a delete is being finalized
+  const deletingRef = useRef(false);
   
   // Error modal state
   const [showErrorModal, setShowErrorModal] = useState(false);
@@ -79,7 +83,8 @@ const ConversationApp: React.FC = () => {
     deleteConversation,
     renameConversation,
     renameBranch,
-    deleteBranch
+    deleteBranch,
+    setConversationTree
   } = useConversations();
 
   const {
@@ -106,6 +111,41 @@ const ConversationApp: React.FC = () => {
     messagesPerPage,
     conversationTree  // Pass the entire conversationTree for branch metadata
   );
+
+
+  // --- Optimistic UI state for pending user message and AI typing ---
+  // pendingUserMessage now tracks error and retry state
+  const [pendingUserMessage, setPendingUserMessage] = useState<null | {
+    id: string;
+    content: string;
+    created_at: string;
+    error?: string;
+    retryCount?: number;
+  }>(null);
+  const [showAITyping, setShowAITyping] = useState(false);
+  const [editingMessage, setEditingMessage] = useState<null | { id: string; content: string; isLeaf: boolean; isFirst: boolean; originView?: 'chat' | 'tree' }>(null);
+  // Delete confirmation modal state
+  const [deleteRequest, setDeleteRequest] = useState<null | { messageId: string; branchName: string; content: string }>(null);
+  const editModalRef = useRef<HTMLDivElement>(null);
+
+  // Handle clicking away from the edit modal
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (editModalRef.current && !editModalRef.current.contains(event.target as Node)) {
+        setEditingMessage(null);
+      }
+    };
+
+    if (editingMessage) {
+      document.addEventListener('mousedown', handleClickOutside);
+    } else {
+      document.removeEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [editingMessage]);
 
   // Save state to localStorage (for refreshing purposes)
   useEffect(() => {
@@ -286,6 +326,22 @@ const ConversationApp: React.FC = () => {
     setShowErrorModal(true);
   }, []);
 
+  // instantiate optimistic delete hook (after showError is defined)
+  const { requestDelete, isDeleting } = useOptimisticDeletes({
+    currentConversationId: currentConversation?.id,
+    conversationTree,
+    setConversationTree,
+    setCurrentBranch,
+    setSelectedMessage,
+    showError,
+    loadConversation
+  });
+
+  // Keep the deletingRef in sync with hook state so send flow can block while deleting
+  useEffect(() => {
+    deletingRef.current = !!isDeleting;
+  }, [isDeleting]);
+
   const handleCreateConversation = useCallback(async (title?: string) => {
     console.log('🔧 Creating new conversation...');
     try {
@@ -336,46 +392,36 @@ const ConversationApp: React.FC = () => {
     }
   }, [currentConversation, conversations, deleteConversation, setSelectedMessage, setShowAllMessages, showError, navigate]);
 
-  const handleSendMessage = useCallback(async () => {
-    if (!currentConversation || !newMessage.trim()) return;
-    
-    // Simple lock mechanism - if already sending, ignore the request
-    if (sendingLockRef.current) {
-      console.log('🔒 Message send blocked - already processing another message');
+  // Helper to send a message (used for both send and retry)
+  const sendUserMessage = useCallback(async (messageText: string, tempId: string, retryCount = 0) => {
+    if (!currentConversation) return;
+    if (deletingRef.current) {
+      showError('Please wait for pending delete to complete before sending a new message.');
+      return false;
+    }
+    setShowAITyping(true);
+    setLoading(true);
+    // Prevent duplicate sends: if a user message with same content and timestamp exists in current branch, do not send
+    const duplicate = allBranchMessages.some(
+      (msg) =>
+        msg.role === 'user' &&
+        msg.content === messageText &&
+        // Allow some leeway in timestamp (since backend may assign a slightly different time)
+        Math.abs(new Date(msg.created_at).getTime() - new Date().getTime()) < 60000
+    );
+    if (duplicate) {
+      setPendingUserMessage(null);
+      setShowAITyping(false);
+      setLoading(false);
       return;
     }
-    
-    // Acquire lock immediately
-    sendingLockRef.current = true;
-    setLoading(true);
-    
     try {
-      const messageText = newMessage.trim();
-      
       // Always use the last message in the current branch as parent (unless it's the first message)
       let parentId: string | undefined = undefined;
       if (allBranchMessages.length > 0) {
         const lastMessage = allBranchMessages[allBranchMessages.length - 1];
         parentId = lastMessage.id;
-        console.log(`🔍 DEBUG: Using last message as parent:`, {
-          currentBranch,
-          lastMessageId: lastMessage.id,
-          lastMessageRole: lastMessage.role,
-          lastMessageContent: lastMessage.content.substring(0, 50) + '...',
-          allBranchMessagesCount: allBranchMessages.length,
-          allBranchMessagesDetails: allBranchMessages.map(msg => ({
-            id: msg.id.substring(0, 8) + '...',
-            role: msg.role,
-            created_at: msg.created_at,
-            content: msg.content.substring(0, 30) + '...'
-          }))
-        });
-      } else {
-        console.log(`🔍 DEBUG: No messages in current branch, using null parent (root message)`);
       }
-      
-      console.log(`🔍 DEBUG: Sending message with parent_id: ${parentId || 'null'}`);
-      
       const success = await sendMessage(
         currentConversation.id,
         messageText,
@@ -383,24 +429,68 @@ const ConversationApp: React.FC = () => {
         currentBranch,
         parentId
       );
-      
       if (success) {
-        // Clear selected message so subsequent messages use the most recent message as parent
         setSelectedMessage(null);
         setIntentionallyDeselected(false);
         setNewMessage(''); // Clear input
+        setPendingUserMessage(null); // Always clear pending/failed message after success
+        setShowAITyping(false);
         await loadConversation(currentConversation.id);
+      } else {
+        // Should not happen, but fallback error
+        setPendingUserMessage(prev => prev && prev.id === tempId ? {
+          ...prev,
+          error: 'Unknown error sending message.',
+          retryCount: retryCount + 1,
+        } : prev);
+        setShowAITyping(false);
       }
-    } catch (error) {
-      console.error('Error sending message:', error);
+    } catch (error: any) {
+      setPendingUserMessage(prev => prev && prev.id === tempId ? {
+        ...prev,
+        error: 'An error occurred. Please retry.',
+        retryCount: retryCount + 1,
+      } : prev);
+      setShowAITyping(false);
+      // Don't clear newMessage so user can edit if desired
     } finally {
-      // Always release lock and stop loading
       sendingLockRef.current = false;
       setLoading(false);
     }
-  }, [currentConversation, newMessage, allBranchMessages, currentBranch, selectedModel, sendMessage, setSelectedMessage, setIntentionallyDeselected, setNewMessage, loadConversation, setLoading]);
+  }, [currentConversation, allBranchMessages, currentBranch, selectedModel, sendMessage, setSelectedMessage, setIntentionallyDeselected, setNewMessage, loadConversation, setLoading]);
 
-  const handleCreateBranch = useCallback(async (messageId: string, branchName: string, color?: string) => {
+  // Main send handler
+  const handleSendMessage = useCallback(async () => {
+    if (!currentConversation || !newMessage.trim()) return;
+    // Prevent multiple pending user messages
+    if (sendingLockRef.current || pendingUserMessage) {
+      console.log('🔒 Message send blocked - already processing another message');
+      return;
+    }
+    // Acquire lock immediately
+    sendingLockRef.current = true;
+    const messageText = newMessage.trim();
+    const tempId = `pending-${Date.now()}`;
+    setPendingUserMessage({
+      id: tempId,
+      content: messageText,
+      created_at: new Date().toISOString(),
+      error: undefined,
+      retryCount: 0,
+    });
+    await sendUserMessage(messageText, tempId, 0);
+  }, [currentConversation, newMessage, pendingUserMessage, sendUserMessage]);
+
+  // Retry handler for failed user message
+  const handleRetrySendMessage = useCallback(async () => {
+    if (!pendingUserMessage || !pendingUserMessage.error) return;
+    if (sendingLockRef.current) return;
+    sendingLockRef.current = true;
+    setPendingUserMessage(prev => prev ? { ...prev, error: undefined } : prev);
+    await sendUserMessage(pendingUserMessage.content, pendingUserMessage.id, pendingUserMessage.retryCount || 0);
+  }, [pendingUserMessage, sendUserMessage]);
+
+  const handleCreateBranch = useCallback(async (messageId: string, branchName: string, color?: string, switchToChat: boolean = true) => {
     if (!currentConversation) return;
 
     try {
@@ -408,8 +498,13 @@ const ConversationApp: React.FC = () => {
       // Immediately update the UI state
       setCurrentBranch(branchName);
       setSelectedMessage(messageId);
-      // Switch to chat view after creating branch for immediate use
-      setViewMode('chat');
+      // Optionally switch to chat view after creating branch for immediate use
+      if (switchToChat) {
+        console.debug('[DEBUG] handleCreateBranch: switchToChat=true -> switching to chat view', { branchName, messageId });
+        setViewMode('chat');
+      } else {
+        console.debug('[DEBUG] handleCreateBranch: switchToChat=false -> staying in current view', { branchName, messageId });
+      }
       // Then reload the conversation to get the updated data
       await loadConversation(currentConversation.id);
     } catch (error: any) {
@@ -418,7 +513,7 @@ const ConversationApp: React.FC = () => {
     }
   }, [currentConversation, createBranch, loadConversation, setSelectedMessage, showError]);
 
-  const handleRegenerate = useCallback(async (messageId: string, type: 'branch' | 'place', branchName?: string) => {
+  const handleRegenerate = useCallback(async (messageId: string, type: 'branch' | 'place', branchName?: string, switchToChat: boolean = true) => {
     if (!currentConversation) return;
 
     try {
@@ -433,9 +528,14 @@ const ConversationApp: React.FC = () => {
         // Reload conversation to get updated data
         await loadConversation(currentConversation.id);
         
-        // Switch to the new branch
-        setCurrentBranch(response.data.branch.name);
-        setViewMode('chat');
+        // Switch to the new branch and optionally switch to chat view
+  setCurrentBranch(response.data.branch.name);
+  if (switchToChat) {
+    console.debug('[DEBUG] handleRegenerate: switchToChat=true -> switching to chat view', { branch: response.data.branch.name, messageId });
+    setViewMode('chat');
+  } else {
+    console.debug('[DEBUG] handleRegenerate: switchToChat=false -> staying in current view', { branch: response.data.branch.name, messageId });
+  }
         
         // Show success message
         console.log(`✅ ${response.data.message}`);
@@ -458,6 +558,24 @@ const ConversationApp: React.FC = () => {
       }
     }
   }, [currentConversation, loadConversation, showError]);
+
+  // Delete last user message (UI wiring)
+  const requestDeleteMessage = useCallback((message: { id: string; branch_name: string; content: string }) => {
+    // Only allow deleting user messages from UI
+    setDeleteRequest({ messageId: message.id, branchName: message.branch_name, content: message.content });
+  }, []);
+
+  const confirmDeleteMessage = useCallback(async (messageId: string) => {
+    if (!currentConversation) return;
+    try {
+      await requestDelete(messageId, deleteRequest?.branchName, deleteRequest?.content);
+    } catch (err) {
+      // error already shown by hook
+    }
+    setDeleteRequest(null);
+  }, [currentConversation, requestDelete, deleteRequest]);
+
+  
 
   const handleMessageSelect = useCallback((messageId: string) => {
     // In tree view, always switch branch if message is from different branch
@@ -515,7 +633,8 @@ const ConversationApp: React.FC = () => {
     setCurrentBranch(branchName);
     setSelectedMessage(messageId);
     setIntentionallyDeselected(false); // Reset intentional deselection when switching to chat view
-    setViewMode('chat');
+  console.debug('[DEBUG] handleSwitchToChatView: user action -> switching to chat view', { branchName, messageId });
+  setViewMode('chat');
   }, [setSelectedMessage, saveToHistory, isNavigating]);
 
   const handleBranchChange = useCallback((newBranch: string) => {
@@ -612,6 +731,48 @@ const ConversationApp: React.FC = () => {
     }
   }, [currentConversation, loadConversation, showError]);
 
+  const handleBeginEdit = useCallback((messageId: string, originalContent: string, originView: 'chat' | 'tree' = 'chat') => {
+    if (!conversationTree) return;
+    const messageNode = conversationTree.messages[messageId];
+    const isLeaf = !messageNode || !messageNode.children || messageNode.children.length === 0;
+    const isFirst = conversationTree.root_messages.includes(messageId);
+    setEditingMessage({ id: messageId, content: originalContent, isLeaf: isLeaf, isFirst: isFirst, originView });
+  }, [conversationTree]);
+
+  const handleCommitEdit = useCallback(async (messageId: string, newContent: string, editType: 'in-place' | 'branch', originView: 'chat' | 'tree' = 'chat') => {
+    if (!currentConversation) return;
+
+    // Rely on the global axios interceptor to add the token.
+    try {
+      if (editType === 'in-place') {
+        await axios.put(`${API_BASE}/conversations/${currentConversation.id}/messages/${messageId}`,
+          { content: newContent }
+        );
+      } else {
+        const response = await axios.post(`${API_BASE}/conversations/${currentConversation.id}/messages/${messageId}/edit-as-branch`,
+          { content: newContent }
+        );
+        // After creating a branch, switch to it; if this edit originated from tree view, remain in tree
+        if (response.data && response.data.branch_name) {
+          setCurrentBranch(response.data.branch_name);
+          console.debug('[DEBUG] handleCommitEdit: edit-as-branch completed', { originView, branch: response.data.branch_name, newMessageId: response.data.id });
+          if (originView !== 'tree') {
+            console.debug('[DEBUG] handleCommitEdit: origin is not tree -> switching to chat view', { originView });
+            setViewMode('chat');
+          } else {
+            console.debug('[DEBUG] handleCommitEdit: origin is tree -> staying in tree view', { originView });
+          }
+          setSelectedMessage(response.data.id);
+        }
+      }
+      setEditingMessage(null);
+      await loadConversation(currentConversation.id);
+    } catch (error: any) {
+      console.error("Failed to edit message:", error);
+      showError(error.response?.data?.detail || "Failed to edit message.");
+    }
+  }, [currentConversation, loadConversation, showError, setCurrentBranch, setViewMode, setSelectedMessage]);
+
   return (
     <div className="App">
       <HeaderControls
@@ -656,9 +817,11 @@ const ConversationApp: React.FC = () => {
                     onSwitchToChatView={handleSwitchToChatView}
                     onCreateBranch={handleCreateBranch}
                     onRegenerate={handleRegenerate}
+                    onBeginEdit={handleBeginEdit}
                     onDeselectMessage={handleDeselectMessage}
                     selectedMessage={selectedMessage || undefined}
                     conversationTree={conversationTree}
+                    onRequestDelete={requestDeleteMessage}
                   />
                 </div>
               ) : viewMode === 'debug' && debugMode ? (
@@ -680,7 +843,12 @@ const ConversationApp: React.FC = () => {
                   onRegenerate={handleRegenerate}
                   onRenameBranch={handleRenameBranch}
                   onDeselectMessage={handleDeselectMessage}
+                  onRequestDelete={requestDeleteMessage}
                   conversationTree={conversationTree}
+                  pendingUserMessage={pendingUserMessage}
+                  showAITyping={showAITyping}
+                  onRetrySendMessage={handleRetrySendMessage}
+                  onBeginEdit={handleBeginEdit}
                 />
               )}
 
@@ -698,6 +866,40 @@ const ConversationApp: React.FC = () => {
         </div>
       </div>
       
+      {/* Edit Message Modal */}
+      {editingMessage && (
+        <div className="modal-overlay">
+          <div className="modal" ref={editModalRef}>
+            <h3>Edit Message</h3>
+            <textarea
+              value={editingMessage.content}
+              onChange={(e) => setEditingMessage({ ...editingMessage, content: e.target.value })}
+              className="edit-textarea"
+              autoFocus
+            />
+            <div className="modal-buttons-vertical">
+              <button 
+                onClick={() => handleCommitEdit(editingMessage.id, editingMessage.content, 'in-place', editingMessage.originView || 'chat')}
+                disabled={!editingMessage.isLeaf}
+                title={editingMessage.isLeaf ? "Replaces the current message. Only for messages with no replies." : "Can only edit the last message of a branch in-place"}
+              >
+                ✏️ Save In-place
+              </button>
+              <button 
+                onClick={() => handleCommitEdit(editingMessage.id, editingMessage.content, 'branch', editingMessage.originView || 'chat')}
+                disabled={editingMessage.isFirst}
+                title={editingMessage.isFirst ? "Cannot create a branch from the very first message" : "Preserves history by creating a new branch from the previous message."}
+              >
+                🌿 Save as New Branch
+              </button>
+              <button className="cancel-button" onClick={() => setEditingMessage(null)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Error Modal */}
       {showErrorModal && (
         <div className="modal-overlay">
@@ -753,6 +955,31 @@ const ConversationApp: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Delete Message Confirmation Modal */}
+      {deleteRequest && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <h3>Delete Message</h3>
+            <p>Are you sure you want to delete this user message?</p>
+            <p style={{ fontStyle: 'italic', color: '#333' }}>&ldquo;{deleteRequest.content.substring(0, 200)}&rdquo;</p>
+            <div style={{ marginTop: 12, fontSize: '0.9rem', color: '#666' }}>
+              <p>If it is the last message in its branch the branch may also be removed.</p>
+            </div>
+            <div className="modal-buttons" style={{ marginTop: 16 }}>
+              <button
+                onClick={() => confirmDeleteMessage(deleteRequest.messageId)}
+                style={{ backgroundColor: '#b22222', color: 'white', marginRight: 8 }}
+              >
+                Delete
+              </button>
+              <button onClick={() => setDeleteRequest(null)}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Deletion is server-canonical; no Undo toast shown to avoid reappearance issues */}
     </div>
   );
 };

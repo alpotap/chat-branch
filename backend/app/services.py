@@ -4,7 +4,7 @@ import uuid
 import os
 import random
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 import random
 import asyncio
 import os
@@ -32,8 +32,8 @@ class ConversationService:
         db_conversation = Conversation(
             title=conversation.title,
             user_id=user_id,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
         )
         db.add(db_conversation)
         db.commit()
@@ -83,6 +83,47 @@ class ConversationService:
             db.rollback()
             raise e
     
+    def add_user_and_ai_messages_transactional(self, db: Session, conversation_id: str, user_message: MessageCreate, ai_response_content: str, user_id: str) -> Message:
+        """
+        Adds a user message and an AI response to the database in a single transaction.
+        This is the robust way to ensure that user messages are not saved if the AI fails.
+        """
+        # 1. Create user message object
+        db_user_message = Message(
+            conversation_id=conversation_id,
+            content=user_message.content,
+            role='user',
+            parent_id=user_message.parent_id,
+            branch_name=user_message.branch_name or "main",
+            llm_model=user_message.llm_model,
+            user_id=user_id,
+            created_at=datetime.now(timezone.utc)
+        )
+        db.add(db_user_message)
+        # We need to flush to get the ID for the parent_id of the AI message
+        db.flush()
+
+        # 2. Create AI message object
+        db_ai_message = Message(
+            conversation_id=conversation_id,
+            content=ai_response_content,
+            role='assistant',
+            parent_id=db_user_message.id,
+            branch_name=user_message.branch_name or "main",
+            llm_model=user_message.llm_model,
+            user_id=user_id,
+            created_at=datetime.now(timezone.utc)
+        )
+        db.add(db_ai_message)
+        
+        # 3. Commit the transaction
+        db.commit()
+        
+        # 4. Refresh the AI message to get all DB-defaults
+        db.refresh(db_ai_message)
+        
+        return db_ai_message
+
     def add_message(self, db: Session, conversation_id: str, message: MessageCreate, user_id: str) -> Message:
         """Add a message to a conversation"""
         
@@ -110,7 +151,7 @@ class ConversationService:
             branch_name=message.branch_name or "main",
             llm_model=message.llm_model,
             user_id=user_id,
-            created_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc)
         )
         
         print(f"💬 Adding message to conversation {conversation_id}: {message.role} in branch '{message.branch_name or 'main'}'")
@@ -191,6 +232,50 @@ class ConversationService:
         
         return llm_context
     
+    def edit_message_in_place(self, db: Session, conversation_id: str, message_id: str, new_content: str, user_id: str) -> Message:
+        """Edits a message in-place, with safety checks."""
+        message = db.query(Message).filter(
+            Message.id == message_id,
+            Message.conversation_id == conversation_id,
+            Message.user_id == user_id
+        ).first()
+
+        if not message:
+            raise ValueError("Message not found or access denied.")
+
+        child_count = db.query(Message).filter(Message.parent_id == message_id).count()
+        if child_count > 0:
+            raise ValueError("Cannot edit a message in-place that has replies.")
+
+        message.content = new_content
+        db.commit()
+        db.refresh(message)
+        return message
+
+    def edit_message_as_branch(self, db: Session, conversation_id: str, original_message_id: str, user_id: str) -> dict:
+        """
+        Creates a new branch from the parent of the original message.
+        Returns the necessary info to create the new message (parent_id, branch_name, model).
+        """
+        original_message = db.query(Message).filter(Message.id == original_message_id, Message.user_id == user_id).first()
+        if not original_message:
+            raise ValueError("Original message not found or access denied.")
+        if not original_message.parent_id:
+            raise ValueError("Cannot create a branch-edit from the first message.")
+
+        branch_point_message_id = original_message.parent_id
+        base_name = f"edit-{original_message.branch_name}"
+        new_branch_name = self.generate_unique_branch_name(db, conversation_id, base_name, user_id)
+
+        branch_data = BranchCreate(name=new_branch_name, created_from_message_id=str(branch_point_message_id), color="#FFC107") # Amber color for edits
+        self.create_branch(db, conversation_id, branch_data, user_id)
+
+        return {
+            "parent_id": str(branch_point_message_id),
+            "branch_name": new_branch_name,
+            "llm_model": original_message.llm_model
+        }
+    
     def _build_conversation_thread(self, branch_messages: List[Message], start_message: Message) -> List[Message]:
         """Build a chronological conversation thread starting from a message"""
         thread = [start_message]
@@ -260,7 +345,7 @@ class ConversationService:
             created_from_message_id=branch.created_from_message_id,
             color=branch.color,
             user_id=user_id,
-            created_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc)
         )
         db.add(db_branch)
         db.commit()
@@ -276,7 +361,8 @@ class ConversationService:
         
         return db.query(Branch).filter(
             Branch.conversation_id == conversation_id,
-            Branch.user_id == user_id
+            Branch.user_id == user_id,
+            Branch.is_active == True
         ).all()
     
     def get_dependent_branches(self, db: Session, conversation_id: str, branch_name: str, user_id: str) -> List[str]:
@@ -407,6 +493,117 @@ class ConversationService:
         db.commit()
         return False
     
+    def soft_delete_last_user_message(self, db: Session, conversation_id: str, message_id: str, user_id: str) -> Dict:
+        """
+        Soft-delete the specified user message if it's the last active message (no active children) in its branch.
+        If the message is the only active message in its branch and the branch is not 'main', also soft-delete the branch.
+
+        Returns a dict: {"message_id": str, "branch_name": str, "branch_deleted": bool}
+        """
+        # Fetch the target message and validate ownership/activity
+        msg = db.query(Message).filter(
+            Message.id == message_id,
+            Message.conversation_id == conversation_id,
+            Message.user_id == user_id,
+            Message.is_active == True
+        ).first()
+
+        if not msg:
+            raise ValueError("Message not found or already inactive")
+
+        if msg.role != "user":
+            raise ValueError("Only user messages can be deleted")
+
+        # Determine branch name for later checks
+        branch_name = msg.branch_name or "main"
+
+        # Ensure the message has no active children (i.e., it's a leaf)
+        active_children = db.query(Message).filter(
+            Message.parent_id == message_id,
+            Message.conversation_id == conversation_id,
+            Message.user_id == user_id,
+            Message.is_active == True
+        ).all()
+
+        # If there are active children, normally deletion is forbidden. However we allow
+        # deleting the user message together with its immediate assistant response when
+        # and only when that assistant child is the most recent active message in the branch
+        # and that assistant has no active children of its own. This implements the
+        # "delete last user-system pair" behavior.
+        allow_delete_pair = False
+        assistant_child = None
+        if len(active_children) > 1:
+            # More than one active child -> cannot safely delete
+            raise ValueError("Cannot delete message that has follow-up responses. Only the most recent leaf message can be deleted.")
+        elif len(active_children) == 1:
+            child = active_children[0]
+            # Only consider the special pair-case when the single child is an assistant reply
+            if child.role == "assistant":
+                # Ensure the assistant child itself has no active children
+                child_active_children_count = db.query(Message).filter(
+                    Message.parent_id == child.id,
+                    Message.conversation_id == conversation_id,
+                    Message.user_id == user_id,
+                    Message.is_active == True
+                ).count()
+                if child_active_children_count == 0:
+                    # Check that this assistant child is the most recent active message in the branch
+                    latest_active_msg = db.query(Message).filter(
+                        Message.conversation_id == conversation_id,
+                        Message.branch_name == branch_name,
+                        Message.user_id == user_id,
+                        Message.is_active == True
+                    ).order_by(Message.created_at.desc()).first()
+
+                    if latest_active_msg and latest_active_msg.id == child.id:
+                        allow_delete_pair = True
+                        assistant_child = child
+            if not allow_delete_pair:
+                raise ValueError("Cannot delete message that has follow-up responses. Only the most recent leaf message can be deleted.")
+
+        # Count active messages in the branch to determine if branch should also be soft-deleted
+        active_messages_in_branch = db.query(Message).filter(
+            Message.conversation_id == conversation_id,
+            Message.branch_name == branch_name,
+            Message.user_id == user_id,
+            Message.is_active == True
+        ).count()
+
+        try:
+            # Soft-delete the message (user)
+            msg.is_active = False
+            db.add(msg)
+
+            branch_deleted = False
+            deleted_ids = [str(msg.id)]
+
+            # If we're deleting an assistant child together with the user message, soft-delete it too
+            if assistant_child is not None and assistant_child.is_active:
+                assistant_child.is_active = False
+                db.add(assistant_child)
+                # Adjust the active messages count to reflect both deletions
+                active_messages_in_branch -= 1
+                deleted_ids.append(str(assistant_child.id))
+
+            # If this was the only active message in the branch and branch != main, soft-delete the branch
+            if active_messages_in_branch <= 1 and branch_name != "main":
+                branch = db.query(Branch).filter(
+                    Branch.conversation_id == conversation_id,
+                    Branch.name == branch_name,
+                    Branch.user_id == user_id,
+                    Branch.is_active == True
+                ).first()
+                if branch:
+                    branch.is_active = False
+                    db.add(branch)
+                    branch_deleted = True
+
+            db.commit()
+            return {"deleted_ids": deleted_ids, "message_id": message_id, "branch_name": branch_name, "branch_deleted": branch_deleted}
+        except Exception:
+            db.rollback()
+            raise
+    
     def regenerate_message_in_branch(self, db: Session, conversation_id: str, message_id: str, branch_name: str, user_id: str) -> tuple[Branch, Message]:
         """Regenerate an AI message by creating a new branch from the previous user message"""
         # Get the AI message to regenerate
@@ -476,7 +673,7 @@ class ConversationService:
             branch_name=final_branch_name,
             llm_model=user_message.llm_model,
             user_id=user_id,
-            created_at=datetime.utcnow()
+            created_at=datetime.now(timezone.utc)
         )
         
         db.add(new_user_message)
@@ -542,10 +739,11 @@ class ConversationService:
         if not conversation:
             raise ValueError("Conversation not found or does not belong to user")
         
-        # Get all messages for this specific conversation and user
+        # Get all ACTIVE messages for this specific conversation and user
         messages = db.query(Message).filter(
             Message.conversation_id == conversation_id,
-            Message.user_id == user_id
+            Message.user_id == user_id,
+            Message.is_active == True
         ).all()
         
         # Debug logging
@@ -765,7 +963,7 @@ class LLMService:
         if use_dummy:
             return await self._generate_dummy_response(context, model)
         if not LITELLM_AVAILABLE:
-            return await self._generate_dummy_response(context, model, error_fallback=True)
+            raise Exception("LiteLLM is not available and USE_DUMMY_RESPONSES is false. Cannot generate response.")
         try:
             # Map frontend model names to LiteLLM model names
             model_map = {
@@ -788,12 +986,11 @@ class LLMService:
                 model=mapped_model,
                 messages=formatted_context,
                 temperature=0.7,
-                max_tokens=1000
             )
             return response.choices[0].message.content
         except Exception as e:
             print(f"❌ Error with real LLM call: {e}")
-            return await self._generate_dummy_response(context, model, error_fallback=True)
+            raise
     
     def _validate_context(self, context: List[Dict]) -> bool:
         """Validate that context is in proper LLM message format"""
@@ -822,22 +1019,6 @@ class LLMService:
         has_anthropic = bool(os.getenv("ANTHROPIC_API_KEY"))
         
         return has_openai or has_anthropic
-    
-    async def _generate_real_response(self, context: List[Dict], model: str) -> str:
-        """Generate real AI response using LiteLLM"""
-        try:
-            response = await litellm.acompletion(
-                model=model,
-                messages=context,
-                temperature=0.7,
-                max_tokens=1000
-            )
-            return response.choices[0].message.content
-            
-        except Exception as e:
-            print(f"❌ Error with real LLM call: {e}")
-            # Fallback to dummy response if real LLM fails
-            return await self._generate_dummy_response(context, model, error_fallback=True)
     
     async def _generate_dummy_response(self, context: List[Dict], model: str, error_fallback: bool = False) -> str:
         """Generate dummy AI response for testing"""
