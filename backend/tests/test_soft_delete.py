@@ -41,6 +41,11 @@ def test_soft_delete_leaf_message(db_session):
     assert result["message_id"] == str(user_msg.id)
     assert result["branch_deleted"] is False
 
+    # Ensure deleted_ids returned includes both messages
+    assert "deleted_ids" in result
+    assert str(user_msg.id) in result["deleted_ids"]
+    assert str(ai_msg.id) in result["deleted_ids"]
+
     # Verify both messages are now inactive
     db_session.refresh(ai_msg)
     db_session.refresh(user_msg)
@@ -95,3 +100,25 @@ def test_soft_delete_fails_when_children_exist(db_session):
     # Attempt to delete u1 (not a leaf) - should raise
     with pytest.raises(ValueError):
         svc.soft_delete_last_user_message(db_session, conv.id, str(u1.id), user.id)
+
+
+def test_build_tree_excludes_inactive(db_session):
+    svc = ConversationService()
+    user = create_user(db_session, email="tree@example.com")
+    conv = create_conversation(db_session, user)
+
+    # Create two messages, then soft-delete one and assert build_conversation_tree excludes it
+    m1 = Message(conversation_id=conv.id, user_id=user.id, content="one", role="user", branch_name="main", created_at=datetime.now(timezone.utc))
+    db_session.add(m1)
+    db_session.flush()
+    m2 = Message(conversation_id=conv.id, user_id=user.id, content="two", role="assistant", parent_id=m1.id, branch_name="main", created_at=datetime.now(timezone.utc))
+    db_session.add(m2)
+    db_session.commit()
+
+    # Soft-delete m1 (this should also mark m2 inactive under pair rule)
+    svc.soft_delete_last_user_message(db_session, conv.id, str(m1.id), user.id)
+
+    tree = svc.build_conversation_tree(db_session, conv.id, user.id)
+    # The inactive messages should not be present
+    assert str(m1.id) not in tree.messages
+    assert str(m2.id) not in tree.messages
