@@ -24,10 +24,6 @@ from app.schemas import (
 )
 from app.services import ConversationService, LLMService, AuthService
 from app.auth import verify_token
-import litellm
-
-# Enable verbose logging for LiteLLM
-litellm.set_verbose = True
 
 # Create tables
 Base.metadata.create_all(bind=engine)
@@ -259,7 +255,8 @@ async def add_message(
     try:
         ai_response_content = await llm_service.generate_response(
             context,
-            model=message.llm_model
+            model=message.llm_model,
+            client_api_key=getattr(message, 'client_api_key', None)
         )
         
         # Handle empty or error-like responses from the LLM service

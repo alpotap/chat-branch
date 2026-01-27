@@ -17,7 +17,7 @@ import { useBranchMessages } from './hooks/useBranchMessages';
 import './App.css';
 
 const API_BASE = process.env.REACT_APP_API_BASE || '/api';
-const DEFAULT_MODEL = 'gemini-2.5-flash';
+const DEFAULT_MODEL = 'openai/gpt-3.5-turbo';
 
 // Simple undo/redo state for within-conversation navigation
 interface ViewState {

@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -55,6 +55,50 @@ const HeaderControls: React.FC<HeaderControlsProps> = ({
   const handleModelChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
     onModelChange(e.target.value);
   }, [onModelChange]);
+
+  // Model management (localStorage-backed POC)
+  const [models, setModels] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem('chatbranch_models');
+      if (raw) return JSON.parse(raw);
+    } catch (e) {
+      // ignore
+    }
+    return [selectedModel || 'openai/gpt-3.5-turbo'];
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('chatbranch_models', JSON.stringify(models));
+    } catch (e) {
+      // ignore
+    }
+  }, [models]);
+
+  const addModel = useCallback(() => {
+    const m = window.prompt('Enter model name (example: openai/gpt-3.5-turbo)');
+    if (!m) return;
+    const name = m.trim();
+    if (!name) return;
+    if (models.includes(name)) {
+      window.alert('Model already exists');
+      return;
+    }
+    setModels(prev => {
+      const next = [...prev, name];
+      return next;
+    });
+    onModelChange(name);
+  }, [models, onModelChange]);
+
+  const removeModel = useCallback((name: string) => {
+    setModels(prev => {
+      const next = prev.filter(m => m !== name);
+      // If removing the selected model, switch to first available
+      if (name === selectedModel && next.length > 0) onModelChange(next[0]);
+      return next;
+    });
+  }, [selectedModel, onModelChange]);
 
   const handleBranchChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
     onBranchChange(e.target.value);
@@ -166,10 +210,34 @@ const HeaderControls: React.FC<HeaderControlsProps> = ({
     setShowBranchManageDialog(false);
   }, []);
 
+  const setClientKey = useCallback(() => {
+    const key = window.prompt('Paste your API key (client-only storage).\nIt will be sent to the server for each request but not stored server-side.');
+    if (key) {
+      const persist = window.confirm('Persist this key across browser sessions? OK = persist (localStorage), Cancel = session only');
+      if (persist) localStorage.setItem('chatbranch_api_key', key);
+      else sessionStorage.setItem('chatbranch_api_key', key);
+      window.location.reload();
+    }
+  }, []);
+
+  const clearClientKey = useCallback(() => {
+    sessionStorage.removeItem('chatbranch_api_key');
+    localStorage.removeItem('chatbranch_api_key');
+    window.location.reload();
+  }, []);
+
   return (
     <div className="header">
       <div className="header-left">
         <h1>🌳 ChatBranch</h1>
+        <button
+          onClick={setClientKey}
+          className="small-btn"
+          title="Quick add client API key"
+          style={{ marginLeft: '8px' }}
+        >
+          🔐 Key
+        </button>
         <div className="navigation-buttons">
           <button 
             onClick={onGoBack}
@@ -247,17 +315,37 @@ const HeaderControls: React.FC<HeaderControlsProps> = ({
           </div>
         )}
         
-        <select 
-          value={selectedModel} 
-          onChange={handleModelChange}
-        >
-          <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
-          <option value="gpt-4">GPT-4</option>
-          <option value="claude-3-sonnet-20240229">Claude 3 Sonnet</option>
-          <option value="claude-3-haiku-20240307">Claude 3 Haiku</option>
-          <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
-          <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-        </select>
+        <div style={{ display: 'inline-flex', alignItems: 'center' }}>
+          <select 
+            value={selectedModel} 
+            onChange={handleModelChange}
+            style={{ minWidth: 220 }}
+          >
+            {models.map(m => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+          </select>
+          <button onClick={addModel} title="Add model" className="small-btn" style={{ marginLeft: 8 }}>＋ Model</button>
+        </div>
+        {/* Simple model list manager for removing models */}
+        {models.length > 1 && (
+          <div style={{ display: 'inline-block', marginLeft: 10 }}>
+            {models.map(m => (
+              <span key={m} style={{ marginRight: 8, display: 'inline-flex', alignItems: 'center' }}>
+                <small style={{ color: '#666', marginRight: 4 }}>{m}</small>
+                <button onClick={() => removeModel(m)} title={`Remove ${m}`} className="tiny-btn">✖</button>
+              </span>
+            ))}
+          </div>
+        )}
+        {/* Simple client-key manager (POC): store key in sessionStorage or localStorage */}
+        <div className="client-key-controls" style={{ display: 'inline-block', marginLeft: '12px' }}>
+          <button onClick={setClientKey} title="Add client API key" className="small-btn">🔑 Set Key</button>
+          <button onClick={clearClientKey} title="Clear client API key" className="small-btn" style={{ marginLeft: '6px' }}>❌ Clear Key</button>
+          { (sessionStorage.getItem('chatbranch_api_key') || localStorage.getItem('chatbranch_api_key')) && (
+            <span style={{ marginLeft: '8px', color: '#0b5', fontWeight: 600 }}>Client Key Active</span>
+          )}
+        </div>
         
         {/* User info and logout */}
         <div className="user-controls">

@@ -127,11 +127,13 @@ ChatBranch is currently in development mode with full LLM integration coming soo
 - **Full functionality** including branching, navigation, and visualization
 - **Perfect for learning** how branching conversations work
 
-### Coming Soon: Full LLM Integration
-- **Connect your own API keys** for OpenAI, Anthropic, and other providers
-- **Real AI responses** instead of demo content
-- **Advanced model switching** with provider-specific features
-- **Usage tracking** and conversation analytics
+### OpenRouter-based LLM gateway (POC)
+- **Default gateway**: The backend now uses OpenRouter as the default LLM gateway.
+	Set `OPENROUTER_API_KEY` in `backend/.env` to enable real model calls from the server.
+- **Client key (POC)**: Advanced users can also paste an OpenRouter API key in the frontend (header "Set Key") for client-only, per-request use — the server does not persist client keys.
+- **Model selection**: Choose any OpenRouter-compatible model name (for example `openai/gpt-3.5-turbo`, `anthropic/claude-3.5`) from the model dropdown.
+- **No Litellm dependency**: The project now uses the official OpenRouter SDK in the backend.
+- **Demo fallback**: Keep `USE_DUMMY_RESPONSES=true` in `.env` to continue using demo responses without incurring API usage.
 
 ## Installation
 
@@ -172,9 +174,8 @@ ChatBranch is actively developed with new features being added regularly. The fo
 - ✅ **Visual branching** with right-click context menus
 - ✅ **Tree visualization** with interactive diagrams
 - ✅ **Navigation system** with undo/redo functionality
-- ✅ **Multi-model support** framework ready
+- ✅ **OpenRouter LLM gateway (POC)** enabled — server uses `OPENROUTER_API_KEY` or frontend-provided keys
 - ✅ **Demo mode** for testing without API costs
-- 🔄 **LLM integration** coming soon
 - 🔄 **Multi-user support** planned for future release
 
 ### Contributing
