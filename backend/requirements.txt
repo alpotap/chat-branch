@@ -49,14 +49,13 @@ Jinja2==3.1.6
 jiter==0.10.0
 jsonschema==4.25.1
 jsonschema-specifications==2025.4.1
-litellm==1.76.0
 Mako==1.3.10
 MarkupSafe==3.0.2
 mccabe==0.7.0
 multidict==6.6.3
 mypy_extensions==1.1.0
 numpy==2.3.1
-openai==1.101.0
+openrouter==0.1.3
 packaging==25.0
 passlib==1.7.4
 pathspec==0.12.1
@@ -69,8 +68,8 @@ psycopg2-binary==2.9.9
 pyasn1==0.6.1
 pyasn1_modules==0.4.2
 pycodestyle==2.11.1
-pydantic==2.5.0
-pydantic_core==2.14.1
+pydantic==2.12.5
+pydantic_core==2.41.5
 pyflakes==3.1.0
 PyJWT==2.8.0
 pyparsing==3.2.3
@@ -94,7 +93,8 @@ tenacity==8.5.0
 tiktoken==0.9.0
 tokenizers==0.21.2
 tqdm==4.67.1
-typing_extensions==4.14.0
+typing-inspection==0.4.2
+typing_extensions==4.15.0
 uritemplate==4.2.0
 urllib3==2.5.0
 uvicorn==0.24.0

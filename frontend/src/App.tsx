@@ -17,7 +17,7 @@ import { useBranchMessages } from './hooks/useBranchMessages';
 import './App.css';
 
 const API_BASE = process.env.REACT_APP_API_BASE || '/api';
-const DEFAULT_MODEL = 'gemini-2.5-flash';
+const DEFAULT_MODEL = 'openai/gpt-3.5-turbo';
 
 // Simple undo/redo state for within-conversation navigation
 interface ViewState {
@@ -734,7 +734,23 @@ const ConversationApp: React.FC = () => {
   const handleBeginEdit = useCallback((messageId: string, originalContent: string, originView: 'chat' | 'tree' = 'chat') => {
     if (!conversationTree) return;
     const messageNode = conversationTree.messages[messageId];
-    const isLeaf = !messageNode || !messageNode.children || messageNode.children.length === 0;
+    // Determine if in-place edit should be allowed.
+    // Allow if:
+    // - message missing from tree (defensive), or
+    // - no children, or
+    // - exactly one child which is an assistant and that assistant has no children
+    let isLeaf = false;
+    if (!messageNode) {
+      isLeaf = true;
+    } else if (!messageNode.children || messageNode.children.length === 0) {
+      isLeaf = true;
+    } else if (messageNode.children.length === 1) {
+      const onlyChild = messageNode.children[0];
+      const childHasChildren = onlyChild.children && onlyChild.children.length > 0;
+      if (onlyChild.role === 'assistant' && !childHasChildren) {
+        isLeaf = true;
+      }
+    }
     const isFirst = conversationTree.root_messages.includes(messageId);
     setEditingMessage({ id: messageId, content: originalContent, isLeaf: isLeaf, isFirst: isFirst, originView });
   }, [conversationTree]);
@@ -878,10 +894,10 @@ const ConversationApp: React.FC = () => {
               autoFocus
             />
             <div className="modal-buttons-vertical">
-              <button 
+              <button
                 onClick={() => handleCommitEdit(editingMessage.id, editingMessage.content, 'in-place', editingMessage.originView || 'chat')}
                 disabled={!editingMessage.isLeaf}
-                title={editingMessage.isLeaf ? "Replaces the current message. Only for messages with no replies." : "Can only edit the last message of a branch in-place"}
+                title={editingMessage.isLeaf ? "Replaces the current message. This will regenerate the assistant reply (if present)." : "Can only edit the last message of a branch in-place"}
               >
                 ✏️ Save In-place
               </button>
@@ -1052,7 +1068,7 @@ const Home: React.FC = () => {
         onRecolorBranch={() => {}}
         viewMode="chat"
         onViewModeChange={() => {}}
-        selectedModel="gpt-3.5-turbo"
+        selectedModel="google/gemma-3-27b-it:free"
         onModelChange={() => {}}
         debugMode={false}
         canGoBack={false}

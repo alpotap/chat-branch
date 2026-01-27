@@ -6,14 +6,14 @@ Easy Docker setup for ChatBranch testing with friends and developers.
 
 ### Prerequisites
 - Docker and Docker Compose installed
-- OpenAI API key (if you want real LLM responses)
+- OpenRouter API key (if you want real LLM responses)
 
 ### 1. Setup Environment
 ```bash
 # The backend and frontend already have .env files configured
 # For Docker deployment with real LLM responses, edit backend/.env:
 # Set USE_DUMMY_RESPONSES=false
-# Set OPENAI_API_KEY=your_actual_openai_api_key_here
+# Set OPENROUTER_API_KEY=your_actual_openrouter_api_key_here
 
 # For Docker deployment, uncomment this line in frontend/.env:
 # REACT_APP_API_BASE=/api

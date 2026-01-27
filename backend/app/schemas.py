@@ -28,6 +28,8 @@ class MessageCreate(BaseModel):
     parent_id: Optional[str] = None
     branch_name: Optional[str] = "main"
     llm_model: Optional[str] = None
+    # Optional client-supplied API key for per-request LLM calls (client-only storage)
+    client_api_key: Optional[str] = None
 
 class MessageResponse(BaseModel):
     id: str
