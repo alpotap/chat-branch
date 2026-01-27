@@ -250,6 +250,10 @@ async def add_message(
     
     # 3. Generate AI response
     try:
+        # If no model was provided, treat this as an explicit demo request
+        if not getattr(message, 'llm_model', None):
+            message.llm_model = "demo-response"
+
         ai_response_content = await llm_service.generate_response(
             context,
             model=message.llm_model,
@@ -498,7 +502,7 @@ async def regenerate_message_in_branch(
             Message.role == "assistant"
         ).first()
         
-        llm_model = original_ai_message.llm_model if original_ai_message else "gpt-3.5-turbo"
+        llm_model = original_ai_message.llm_model if (original_ai_message and original_ai_message.llm_model) else "demo-response"
         
         # Generate AI response
         ai_response = await llm_service.generate_response(context, llm_model)
@@ -639,10 +643,59 @@ async def edit_message_in_place(
     if not new_content:
         raise HTTPException(status_code=400, detail="New content not provided.")
     try:
-        updated_message = conversation_service.edit_message_in_place(
-            db, conversation_id, message_id, new_content, current_user.id
-        )
-        return MessageResponse.from_orm(updated_message)
+        # Load the message and its direct children
+        msg = db.query(Message).filter(
+            Message.id == message_id,
+            Message.conversation_id == conversation_id,
+            Message.user_id == current_user.id
+        ).first()
+        if not msg:
+            raise HTTPException(status_code=404, detail="Message not found or access denied.")
+
+        children = db.query(Message).filter(Message.parent_id == message_id, Message.conversation_id == conversation_id).all()
+
+        # If no children, simple in-place edit
+        if not children:
+            updated_message = conversation_service.edit_message_in_place(
+                db, conversation_id, message_id, new_content, current_user.id
+            )
+            return MessageResponse.from_orm(updated_message)
+
+        # If exactly one child and it's an assistant with no further children,
+        # allow in-place edit by updating the user message and regenerating the assistant response.
+        if len(children) == 1 and children[0].role == 'assistant':
+            assistant_msg = children[0]
+            # Ensure assistant message has no replies
+            assistant_children_count = db.query(Message).filter(Message.parent_id == assistant_msg.id).count()
+            if assistant_children_count == 0:
+                # Update user message content
+                msg.content = new_content
+                db.commit()
+
+                # Build context for regeneration and append updated user message
+                context = conversation_service.get_message_context(db, conversation_id, msg.branch_name, current_user.id)
+                context.append({"role": "user", "content": new_content})
+
+                # Generate new AI response (use stored llm_model if present)
+                try:
+                    ai_response_content = await llm_service.generate_response(
+                        context,
+                        model=msg.llm_model or "demo-response"
+                    )
+                except Exception as e:
+                    # Roll back user edit on LLM failure to avoid partial state
+                    db.rollback()
+                    raise HTTPException(status_code=503, detail=f"AI regeneration failed: {str(e)}")
+
+                # Update assistant message content and timestamp
+                assistant_msg.content = ai_response_content
+                assistant_msg.created_at = datetime.now(timezone.utc)
+                db.commit()
+                db.refresh(msg)
+                return MessageResponse.from_orm(msg)
+
+        # Otherwise, not allowed
+        raise HTTPException(status_code=400, detail="Cannot edit message in-place because it has replies. Consider editing as a new branch.")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

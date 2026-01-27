@@ -64,6 +64,22 @@ npm start
 
 Frontend dev server runs on http://localhost:3000 by default and will proxy API calls to the backend dev server at http://localhost:8001.
 
+## Default demo user
+
+For quick testing you can create a demo user account. There is no built-in password in the image by default, but you can create one with the helper script in the backend. Example credentials we use for demos:
+
+- Email: demo@chatbranch.local
+- Password: demo123
+
+To create this user quickly (from the repo root):
+
+```bash
+cd backend
+python scripts/add_user.py demo@chatbranch.local demo123 --force
+```
+
+When deploying via docker, two users are created by default.
+
 ## Key Features to Test
 
 ### Basic Usage

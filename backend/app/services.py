@@ -709,7 +709,7 @@ class ConversationService:
             raise ValueError("Cannot regenerate message that has branches created from it. Only the most recent message in a branch can be regenerated.")
         
         # Return the original message info for regeneration
-        return ai_message.id, ai_message.branch_name, ai_message.llm_model or "gpt-3.5-turbo"
+        return ai_message.id, ai_message.branch_name, ai_message.llm_model or "google/gemma-3-27b-it:free"
     
     def create_branch_without_validation(self, db: Session, conversation_id: str, branch: BranchCreate, user_id: str) -> Branch:
         """Create a new branch without name validation (for internal use)"""
@@ -942,16 +942,21 @@ class LLMService:
             "Long-term sustainability and evolution of the solution should also be considered."
         ]
     
-    async def generate_response(self, context: List[Dict], model: str = "gpt-3.5-turbo", client_api_key: Optional[str] = None, **options: Any) -> str:
+    async def generate_response(self, context: List[Dict], model: str = "google/gemma-3-27b-it:free", client_api_key: Optional[str] = None, **options: Any) -> str:
         """
         Generate a response using OpenRouter for any supported model.
         Falls back to dummy response if USE_DUMMY_RESPONSES is true or on error.
 
         Accepts an optional `client_api_key` which will be used for this single call only.
         """
+        # If explicitly requesting demo responses via the special model id, always use dummy generator
+        if model == "demo-response":
+            return await self._generate_dummy_response(context, model)
+
         use_dummy = os.getenv("USE_DUMMY_RESPONSES", "true").lower() == "true"
         if use_dummy:
             return await self._generate_dummy_response(context, model)
+
         # Delegate to helper that supports per-request API keys
         return await self._call_openrouter(context=context, model=model, client_api_key=client_api_key, **options)
 

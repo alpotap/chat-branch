@@ -58,6 +58,13 @@ const TreeView: React.FC<TreeViewProps> = ({
   onRetrySendMessage
   ,onRequestDelete
 }) => {
+  const TRUNCATE_LENGTH = 140;
+  const normalizeContent = (s?: string) => (s || '').replace(/\s+/g, ' ').trim();
+  const truncate = (s?: string, len = TRUNCATE_LENGTH) => {
+    const text = normalizeContent(s);
+    if (text.length <= len) return text;
+    return text.slice(0, len - 1) + '…';
+  };
   const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 });
   const [contextMenuMessage, setContextMenuMessage] = useState<Message | null>(null);
   const [showBranchDialog, setShowBranchDialog] = useState(false);
@@ -187,7 +194,7 @@ const TreeView: React.FC<TreeViewProps> = ({
               title={message.role === 'assistant' ? "Click to select. Double-click to switch to chat view. Right-click to create branch." : "Click to select. Double-click to switch to chat view."}
             >
               <div className="tree-node-header"></div>
-              <div className="tree-node-content">{message.content}</div>
+              <div className="tree-node-content" title={normalizeContent(message.content)}>{truncate(message.content)}</div>
               {message.llm_model && <div className="tree-node-model">{message.llm_model}</div>}
             </div>
           ),
@@ -250,8 +257,8 @@ const TreeView: React.FC<TreeViewProps> = ({
             label: (
               <div className={`tree-node user pending`} style={{ opacity: pendingUserMessage.error ? 1 : 0.7 }}>
                 <div className="tree-node-header"></div>
-                <div className="tree-node-content">
-                  {pendingUserMessage.content}
+                <div className="tree-node-content" title={normalizeContent(pendingUserMessage.content)}>
+                  {truncate(pendingUserMessage.content)}
                   {pendingUserMessage.error && (
                     <div className="message-error" style={{ color: '#e53e3e', marginTop: 8, fontSize: '0.95em' }}>
                       <span>❌ {pendingUserMessage.error}</span>

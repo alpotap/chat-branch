@@ -56,16 +56,36 @@ const HeaderControls: React.FC<HeaderControlsProps> = ({
     onModelChange(e.target.value);
   }, [onModelChange]);
 
+  // Normalize a user-entered model string into a canonical OpenRouter id when possible.
+  const normalizeModel = (input: string) => {
+    const v = (input || '').trim();
+    if (!v) return v;
+    const lower = v.toLowerCase();
+    // explicit demo shorthand
+    if (lower === 'demo' || lower === 'demo-response') return 'demo-response';
+    // If already contains a provider prefix, return as-is
+    if (v.includes('/')) return v;
+    // Fall back to returning original input
+    return v;
+  };
+
   // Model management (localStorage-backed POC)
   const [models, setModels] = useState<string[]>(() => {
     try {
       const raw = localStorage.getItem('chatbranch_models');
-      if (raw) return JSON.parse(raw);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed.map((p: string) => normalizeModel(p));
+      }
     } catch (e) {
       // ignore
     }
-    return [selectedModel || 'openai/gpt-3.5-turbo'];
+    // Ensure the demo model is available by default for new users
+    const defaults = [normalizeModel('demo-response'), normalizeModel(selectedModel || 'google/gemma-3-27b-it:free')];
+    // Deduplicate while preserving order
+    return Array.from(new Set(defaults));
   });
+
 
   useEffect(() => {
     try {
@@ -208,7 +228,8 @@ const HeaderControls: React.FC<HeaderControlsProps> = ({
   const closeManageModels = useCallback(() => setShowManageModels(false), []);
 
   const handleAddModelInline = useCallback(() => {
-    const name = newModelValue.trim();
+    const raw = newModelValue.trim();
+    const name = normalizeModel(raw);
     if (!name) return setManageMessage('Model name cannot be empty');
     if (models.includes(name)) return setManageMessage('Model already exists');
     setModels(prev => {
