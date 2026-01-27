@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 import uuid
 import os
 import random
@@ -10,14 +10,7 @@ import asyncio
 import os
 from dotenv import load_dotenv
 import aiohttp
-
-# Try to import litellm, but don't fail if it's not available
-try:
-    import litellm
-    LITELLM_AVAILABLE = True
-except ImportError:
-    LITELLM_AVAILABLE = False
-    print("⚠️  LiteLLM not available, using dummy responses only")
+from openrouter import OpenRouter
 
 load_dotenv()
 
@@ -716,7 +709,7 @@ class ConversationService:
             raise ValueError("Cannot regenerate message that has branches created from it. Only the most recent message in a branch can be regenerated.")
         
         # Return the original message info for regeneration
-        return ai_message.id, ai_message.branch_name, ai_message.llm_model or "gpt-3.5-turbo"
+        return ai_message.id, ai_message.branch_name, ai_message.llm_model or "google/gemma-3-27b-it:free"
     
     def create_branch_without_validation(self, db: Session, conversation_id: str, branch: BranchCreate, user_id: str) -> Branch:
         """Create a new branch without name validation (for internal use)"""
@@ -910,22 +903,17 @@ class LLMService:
     
     Configuration:
     - Set USE_DUMMY_RESPONSES=false in .env to enable real LLM calls
-    - Add OPENAI_API_KEY and/or ANTHROPIC_API_KEY for real LLM access
-    - Install optional dependencies: pip install litellm python-dotenv
     
     Message Format:
     - Uses standard OpenAI format: [{"role": "user/assistant", "content": "..."}]
-    - Supports models: gpt-3.5-turbo, gpt-4, claude-3-sonnet-20240229, claude-3-haiku-20240307
     """
     
     def __init__(self):
         # Configuration - set USE_DUMMY_RESPONSES=false in .env to use real LLMs
         self.use_dummy_responses = os.getenv("USE_DUMMY_RESPONSES", "true").lower() == "true"
         
-        # Set up API keys for real LLM calls
-        if not self.use_dummy_responses and LITELLM_AVAILABLE:
-            os.environ["OPENAI_API_KEY"] = os.getenv("OPENAI_API_KEY", "")
-            os.environ["ANTHROPIC_API_KEY"] = os.getenv("ANTHROPIC_API_KEY", "")
+        # No environment mutation; use OPENROUTER_API_KEY as server default
+        # Client-provided per-request keys are accepted via `client_api_key` argument
         
         # Dummy responses for testing
         self.dummy_responses = [
@@ -954,42 +942,63 @@ class LLMService:
             "Long-term sustainability and evolution of the solution should also be considered."
         ]
     
-    async def generate_response(self, context: List[Dict], model: str = "gpt-3.5-turbo") -> str:
+    async def generate_response(self, context: List[Dict], model: str = "google/gemma-3-27b-it:free", client_api_key: Optional[str] = None, **options: Any) -> str:
         """
-        Generate a response using LiteLLM for any supported model (OpenAI, Gemini, Anthropic, etc).
+        Generate a response using OpenRouter for any supported model.
         Falls back to dummy response if USE_DUMMY_RESPONSES is true or on error.
+
+        Accepts an optional `client_api_key` which will be used for this single call only.
         """
+        # If explicitly requesting demo responses via the special model id, always use dummy generator
+        if model == "demo-response":
+            return await self._generate_dummy_response(context, model)
+
         use_dummy = os.getenv("USE_DUMMY_RESPONSES", "true").lower() == "true"
         if use_dummy:
             return await self._generate_dummy_response(context, model)
-        if not LITELLM_AVAILABLE:
-            raise Exception("LiteLLM is not available and USE_DUMMY_RESPONSES is false. Cannot generate response.")
+
+        # Delegate to helper that supports per-request API keys
+        return await self._call_openrouter(context=context, model=model, client_api_key=client_api_key, **options)
+
+    async def _call_openrouter(self, context: List[Dict], model: str, client_api_key: Optional[str] = None, **options: Any) -> str:
+        """
+        Call OpenRouter to generate a chat completion. Uses `client_api_key` for a single request
+        if provided; otherwise falls back to server `OPENROUTER_API_KEY` from the environment.
+        """
+        mapped_model = model
+
+        # Normalize context to OpenRouter message format
+        formatted_context = []
+        for msg in context:
+            role = msg.get("role")
+            if role not in ("user", "assistant", "system"):
+                role = "user" if role == "model" else "assistant"
+            formatted_context.append({"role": role, "content": msg["content"]})
+
+        api_key = client_api_key or os.getenv("OPENROUTER_API_KEY", "")
+        if not api_key:
+            raise Exception("No OpenRouter API key available (set OPENROUTER_API_KEY or provide client_api_key).")
+
         try:
-            # Map frontend model names to LiteLLM model names
-            model_map = {
-                "gpt-3.5-turbo": "gpt-3.5-turbo",
-                "gpt-4": "gpt-4",
-                "claude-3-sonnet-20240229": "claude-3-sonnet-20240229",
-                "claude-3-haiku-20240307": "claude-3-haiku-20240307",
-                "gemini-2.5-pro": "gemini/gemini-2.5-pro",
-                "gemini-2.5-flash": "gemini/gemini-2.5-flash"
-            }
-            mapped_model = model_map.get(model, model)
-            # Ensure context is in OpenAI format: [{"role": "user"|"assistant", "content": ...}]
-            formatted_context = []
-            for msg in context:
-                role = msg.get("role")
-                if role not in ("user", "assistant"):
-                    role = "user" if role == "model" else "assistant"
-                formatted_context.append({"role": role, "content": msg["content"]})
-            response = await litellm.acompletion(
-                model=mapped_model,
-                messages=formatted_context,
-                temperature=0.7,
-            )
-            return response.choices[0].message.content
+            async with OpenRouter(api_key=api_key) as client:
+                # Use send_async for async requests per SDK docs
+                response = await client.chat.send_async(
+                    model=mapped_model,
+                    messages=formatted_context,
+                    temperature=options.get("temperature", 0.7),
+                    max_tokens=options.get("max_tokens"),
+                )
+
+                # Response structure follows SDK docs
+                if response and getattr(response, "choices", None):
+                    return response.choices[0].message.content
+                # Fallback: try to extract from raw dict
+                if isinstance(response, dict) and response.get("choices"):
+                    return response["choices"][0]["message"]["content"]
+
+                raise Exception("Unexpected response shape from OpenRouter")
         except Exception as e:
-            print(f"❌ Error with real LLM call: {e}")
+            print(f"❌ Error calling OpenRouter: {e}")
             raise
     
     def _validate_context(self, context: List[Dict]) -> bool:
@@ -1011,87 +1020,25 @@ class LLMService:
     
     def _can_use_real_llm(self) -> bool:
         """Check if real LLM calls are possible"""
-        if not LITELLM_AVAILABLE:
-            return False
-        
-        # Check if we have at least one API key
-        has_openai = bool(os.getenv("OPENAI_API_KEY"))
-        has_anthropic = bool(os.getenv("ANTHROPIC_API_KEY"))
-        
-        return has_openai or has_anthropic
+        # Check for configured OpenRouter API key
+        has_key = bool(os.getenv("OPENROUTER_API_KEY"))
+        return has_key
     
     async def _generate_dummy_response(self, context: List[Dict], model: str, error_fallback: bool = False) -> str:
-        """Generate dummy AI response for testing"""
-        
-        # Simulate API call delay
-        await self._simulate_api_delay(model)
-        
-        # Get last user message for context-aware response
-        last_message = ""
-        for msg in reversed(context):
-            if msg.get("role") == "user":
-                last_message = msg.get("content", "")
-                break
-        
-        # Choose response based on conversation length
-        conversation_length = len([msg for msg in context if msg.get("role") == "user"])
-        
-        if conversation_length <= 1:
-            # First response
-            base_response = random.choice(self.dummy_responses)
-        else:
-            # Follow-up response
-            base_response = random.choice(self.follow_up_responses)
-        
-        # Add model-specific formatting
-        response = self._format_response_for_model(base_response, model, last_message, error_fallback)
-        
-        return response
-    
-    async def _simulate_api_delay(self, model: str):
-        """Simulate realistic API response times"""
-        delays = {
-            "gpt-3.5-turbo": (0.5, 1.5),
-            "gpt-4": (2.0, 4.0),
-            "claude-3-sonnet-20240229": (1.0, 2.5),
-            "claude-3-haiku-20240307": (0.3, 1.0),
-        }
-        
-        min_delay, max_delay = delays.get(model, (0.5, 2.0))
-        delay = random.uniform(min_delay, max_delay)
-        
-        # Simulate with a short delay for testing
-        await asyncio.sleep(min(delay, 0.5))  # Cap at 0.5s for testing
-    
-    def _format_response_for_model(self, base_response: str, model: str, last_message: str, error_fallback: bool = False) -> str:
-        """Format response to simulate different model styles"""
-        
-        # Add appropriate prefix
+        """Generate a simple dummy AI response for testing: small delay, fixed responses."""
+        # Small fixed delay to simulate network/processing
+        await asyncio.sleep(0.2)
+        base_response = random.choice(self.dummy_responses)
+        return self._format_response_for_model(base_response, model, error_fallback)
+
+    def _format_response_for_model(self, base_response: str, model: str, error_fallback: bool = False) -> str:
+        """Apply a small model prefix to dummy responses for clarity."""
         if error_fallback:
             model_prefix = f"[FALLBACK-DEMO {model}] "
         elif self.use_dummy_responses:
             model_prefix = f"[DEMO {model}] "
         else:
-            model_prefix = ""  # No prefix for real responses
-        
-        # Add some context awareness
-        if last_message:
-            if "?" in last_message:
-                base_response = f"You asked about {last_message[:30]}... {base_response}"
-            elif any(word in last_message.lower() for word in ["hello", "hi", "hey"]):
-                base_response = "Hello! " + base_response
-            elif any(word in last_message.lower() for word in ["thank", "thanks"]):
-                base_response = "You're welcome! " + base_response
-        
-        # Simulate different model characteristics
-        if "gpt-4" in model:
-            base_response += "\n\nI should note that this is a comprehensive topic with many nuances to consider."
-        elif "claude" in model:
-            base_response += "\n\nI hope this helps clarify things for you!"
-        elif "haiku" in model:
-            # Shorter response for haiku
-            base_response = base_response[:100] + "..."
-        
+            model_prefix = ""
         return model_prefix + base_response
 
 class AuthService:

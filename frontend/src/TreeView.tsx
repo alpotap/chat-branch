@@ -58,6 +58,13 @@ const TreeView: React.FC<TreeViewProps> = ({
   onRetrySendMessage
   ,onRequestDelete
 }) => {
+  const TRUNCATE_LENGTH = 140;
+  const normalizeContent = (s?: string) => (s || '').replace(/\s+/g, ' ').trim();
+  const truncate = (s?: string, len = TRUNCATE_LENGTH) => {
+    const text = normalizeContent(s);
+    if (text.length <= len) return text;
+    return text.slice(0, len - 1) + '…';
+  };
   const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 });
   const [contextMenuMessage, setContextMenuMessage] = useState<Message | null>(null);
   const [showBranchDialog, setShowBranchDialog] = useState(false);
@@ -122,7 +129,17 @@ const TreeView: React.FC<TreeViewProps> = ({
     const edges: Edge[] = [];
     const positions: Record<string, { x: number; y: number }> = {};
     const spacingX = 300;
-    const spacingY = 160;
+    const spacingYBase = 160;
+    const spacingAssistantToUser = 220; // larger gap between AI response and next human message
+    const spacingUserToAssistant = 120; // smaller gap between human message and AI response
+
+    function computeSpacing(parentId: string, childId: string) {
+      const parentRole = messages[parentId]?.role || '';
+      const childRole = messages[childId]?.role || '';
+      if (parentRole === 'assistant' && childRole === 'user') return spacingAssistantToUser;
+      if (parentRole === 'user' && childRole === 'assistant') return spacingUserToAssistant;
+      return spacingYBase;
+    }
     // Helper to recursively layout the tree
     function layoutTree(messageId: string, x: number, y: number, visited: Set<string>) {
       if (visited.has(messageId)) return x;
@@ -134,7 +151,8 @@ const TreeView: React.FC<TreeViewProps> = ({
       const childIds: string[] = (childrenRaw as any[]).map(child => typeof child === 'string' ? child : child.id);
       let currentX = x;
       childIds.forEach((childId, idx) => {
-        currentX = layoutTree(childId, currentX, y + spacingY, visited);
+        const deltaY = computeSpacing(messageId, childId);
+        currentX = layoutTree(childId, currentX, y + deltaY, visited);
         if (idx < childIds.length - 1) currentX += spacingX;
       });
       if (childIds.length > 1) {
@@ -176,7 +194,7 @@ const TreeView: React.FC<TreeViewProps> = ({
               title={message.role === 'assistant' ? "Click to select. Double-click to switch to chat view. Right-click to create branch." : "Click to select. Double-click to switch to chat view."}
             >
               <div className="tree-node-header"></div>
-              <div className="tree-node-content">{message.content}</div>
+              <div className="tree-node-content" title={normalizeContent(message.content)}>{truncate(message.content)}</div>
               {message.llm_model && <div className="tree-node-model">{message.llm_model}</div>}
             </div>
           ),
@@ -226,9 +244,10 @@ const TreeView: React.FC<TreeViewProps> = ({
             }
           }
         });
+        const pendingDeltaY = lastMsgId ? computeSpacing(lastMsgId, pendingUserMessage.id) : spacingYBase;
         const pendingPos = lastMsgId ? {
           x: (positions[lastMsgId]?.x || 0),
-          y: (positions[lastMsgId]?.y || 0) + spacingY,
+          y: (positions[lastMsgId]?.y || 0) + pendingDeltaY,
         } : { x: 0, y: 0 };
         nodes.push({
           id: pendingUserMessage.id,
@@ -238,8 +257,8 @@ const TreeView: React.FC<TreeViewProps> = ({
             label: (
               <div className={`tree-node user pending`} style={{ opacity: pendingUserMessage.error ? 1 : 0.7 }}>
                 <div className="tree-node-header"></div>
-                <div className="tree-node-content">
-                  {pendingUserMessage.content}
+                <div className="tree-node-content" title={normalizeContent(pendingUserMessage.content)}>
+                  {truncate(pendingUserMessage.content)}
                   {pendingUserMessage.error && (
                     <div className="message-error" style={{ color: '#e53e3e', marginTop: 8, fontSize: '0.95em' }}>
                       <span>❌ {pendingUserMessage.error}</span>

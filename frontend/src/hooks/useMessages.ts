@@ -26,12 +26,15 @@ export const useMessages = () => {
     });
 
     try {
+      // Include client-stored API key if present (sessionStorage preferred)
+      const clientKey = sessionStorage.getItem('chatbranch_api_key') || localStorage.getItem('chatbranch_api_key') || undefined;
       await axios.post(`${API_BASE}/conversations/${conversationId}/messages`, {
         content: message,
         role: 'user',
         llm_model: selectedModel,
         branch_name: currentBranch,
-        parent_id: parentMessageId || null
+        parent_id: parentMessageId || null,
+        client_api_key: clientKey
       });
       setNewMessage('');
       return true;

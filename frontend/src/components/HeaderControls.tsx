@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -21,7 +21,7 @@ interface HeaderControlsProps {
   onGoBack: () => void;
   canGoForward: boolean;
   onGoForward: () => void;
-  hasMessages?: boolean; // New prop to check if conversation has messages
+  hasMessages?: boolean;
 }
 
 const HeaderControls: React.FC<HeaderControlsProps> = ({
@@ -55,6 +55,47 @@ const HeaderControls: React.FC<HeaderControlsProps> = ({
   const handleModelChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
     onModelChange(e.target.value);
   }, [onModelChange]);
+
+  // Normalize a user-entered model string into a canonical OpenRouter id when possible.
+  const normalizeModel = (input: string) => {
+    const v = (input || '').trim();
+    if (!v) return v;
+    const lower = v.toLowerCase();
+    // explicit demo shorthand
+    if (lower === 'demo' || lower === 'demo-response') return 'demo-response';
+    // If already contains a provider prefix, return as-is
+    if (v.includes('/')) return v;
+    // Fall back to returning original input
+    return v;
+  };
+
+  // Model management (localStorage-backed POC)
+  const [models, setModels] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem('chatbranch_models');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed.map((p: string) => normalizeModel(p));
+      }
+    } catch (e) {
+      // ignore
+    }
+    // Ensure the demo model is available by default for new users
+    const defaults = [normalizeModel('demo-response'), normalizeModel(selectedModel || 'google/gemma-3-27b-it:free')];
+    // Deduplicate while preserving order
+    return Array.from(new Set(defaults));
+  });
+
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('chatbranch_models', JSON.stringify(models));
+    } catch (e) {
+      // ignore
+    }
+  }, [models]);
+
+  
 
   const handleBranchChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
     onBranchChange(e.target.value);
@@ -166,6 +207,75 @@ const HeaderControls: React.FC<HeaderControlsProps> = ({
     setShowBranchManageDialog(false);
   }, []);
 
+  // Manage Models & Client Key modal state
+  const [showManageModels, setShowManageModels] = useState(false);
+  const [newModelValue, setNewModelValue] = useState('');
+  const [manageMessage, setManageMessage] = useState<string | null>(null);
+  const [keyInputValue, setKeyInputValue] = useState('');
+  const [keyPersist, setKeyPersist] = useState<boolean>(true);
+
+  useEffect(() => {
+    // initialize key input from storage when modal is opened
+    if (showManageModels) {
+      const stored = localStorage.getItem('chatbranch_api_key') || sessionStorage.getItem('chatbranch_api_key') || '';
+      setKeyInputValue(stored);
+      setKeyPersist(!!localStorage.getItem('chatbranch_api_key'));
+      setManageMessage(null);
+    }
+  }, [showManageModels]);
+
+  const openManageModels = useCallback(() => setShowManageModels(true), []);
+  const closeManageModels = useCallback(() => setShowManageModels(false), []);
+
+  const handleAddModelInline = useCallback(() => {
+    const raw = newModelValue.trim();
+    const name = normalizeModel(raw);
+    if (!name) return setManageMessage('Model name cannot be empty');
+    if (models.includes(name)) return setManageMessage('Model already exists');
+    setModels(prev => {
+      const next = [...prev, name];
+      return next;
+    });
+    onModelChange(name);
+    setNewModelValue('');
+    setManageMessage(`Added model ${name}`);
+  }, [newModelValue, models, onModelChange]);
+
+  const handleRemoveModelInline = useCallback((name: string) => {
+    setModels(prev => {
+      const next = prev.filter(m => m !== name);
+      if (name === selectedModel && next.length > 0) onModelChange(next[0]);
+      return next;
+    });
+    setManageMessage(`Removed model ${name}`);
+  }, [selectedModel, onModelChange]);
+
+  const handleSaveKey = useCallback(() => {
+    if (!keyInputValue) {
+      // clear
+      sessionStorage.removeItem('chatbranch_api_key');
+      localStorage.removeItem('chatbranch_api_key');
+      setManageMessage('Cleared client key');
+      return;
+    }
+    if (keyPersist) {
+      localStorage.setItem('chatbranch_api_key', keyInputValue);
+      sessionStorage.removeItem('chatbranch_api_key');
+    } else {
+      sessionStorage.setItem('chatbranch_api_key', keyInputValue);
+      localStorage.removeItem('chatbranch_api_key');
+    }
+    setManageMessage('Saved client key');
+  }, [keyInputValue, keyPersist]);
+
+  const handleClearKeyInline = useCallback(() => {
+    sessionStorage.removeItem('chatbranch_api_key');
+    localStorage.removeItem('chatbranch_api_key');
+    setKeyInputValue('');
+    setKeyPersist(true);
+    setManageMessage('Cleared client key');
+  }, []);
+
   return (
     <div className="header">
       <div className="header-left">
@@ -247,17 +357,18 @@ const HeaderControls: React.FC<HeaderControlsProps> = ({
           </div>
         )}
         
-        <select 
-          value={selectedModel} 
-          onChange={handleModelChange}
-        >
-          <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
-          <option value="gpt-4">GPT-4</option>
-          <option value="claude-3-sonnet-20240229">Claude 3 Sonnet</option>
-          <option value="claude-3-haiku-20240307">Claude 3 Haiku</option>
-          <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
-          <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-        </select>
+        <div style={{ display: 'inline-flex', alignItems: 'center' }}>
+          <select 
+            value={selectedModel} 
+            onChange={handleModelChange}
+            style={{ minWidth: 220 }}
+          >
+            {models.map(m => (
+              <option key={m} value={m}>{m}</option>
+            ))}
+          </select>
+          <button onClick={openManageModels} title="Manage models & client key" className="small-btn" style={{ marginLeft: 8 }}>Manage Models</button>
+        </div>
         
         {/* User info and logout */}
         <div className="user-controls">
@@ -438,6 +549,77 @@ const HeaderControls: React.FC<HeaderControlsProps> = ({
               >
                 Cancel
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Manage Models & Client Key Modal */}
+      {showManageModels && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <h3>🧩 Manage Models & Client Key</h3>
+
+            <div style={{ marginBottom: 8 }}>
+              <label style={{ display: 'block', marginBottom: 4, color: '#111' }}>Add Model (Openrouter)</label>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <input
+                  type="text"
+                  value={newModelValue}
+                  onChange={(e) => setNewModelValue(e.target.value)}
+                  placeholder="E.g. google/gemma-3-27b-it:free"
+                  style={{ flex: 1, color: '#111', padding: '6px 8px' }}
+                />
+                <button onClick={handleAddModelInline} className="confirm-btn" style={{ backgroundColor: '#667eea', color: '#fff', border: 'none', padding: '6px 10px' }}>Add</button>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 8 }}>
+              <label style={{ display: 'block', marginBottom: 4, color: '#111' }}>Current Models</label>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, maxHeight: 120, overflowY: 'auto' }}>
+                {models.map(m => (
+                  <div key={m} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', background: 'rgba(0,0,0,0.03)', borderRadius: 6 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <strong style={{ fontSize: '0.9em', color: '#111' }}>{m}</strong>
+                      {m === selectedModel && <small style={{ color: '#666' }}> (selected)</small>}
+                    </div>
+                    <div>
+                      <button onClick={() => handleRemoveModelInline(m)} className="tiny-btn" style={{ background: '#e5e7eb', color: '#111', border: 'none' }}>Remove</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <hr />
+
+            <div style={{ marginTop: 8 }}>
+              <label style={{ display: 'block', marginBottom: 4, color: '#111' }}>Client API Key</label>
+              <input
+                type="password"
+                value={keyInputValue}
+                onChange={(e) => setKeyInputValue(e.target.value)}
+                placeholder="Paste OpenRouter API key"
+                style={{ width: '100%', marginBottom: 6, color: '#111', padding: '6px 8px' }}
+              />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#111' }}>
+                  <input type="checkbox" checked={keyPersist} onChange={(e) => setKeyPersist(e.target.checked)} />
+                  Persist across sessions
+                </label>
+                <button onClick={handleSaveKey} className="confirm-btn" style={{ backgroundColor: '#667eea', color: '#fff', border: 'none', padding: '6px 10px' }}>Save Key</button>
+                <button onClick={handleClearKeyInline} className="cancel-btn" style={{ background: '#6b7280', color: '#fff', border: 'none', padding: '6px 10px' }}>Clear</button>
+              </div>
+              { (localStorage.getItem('chatbranch_api_key') || sessionStorage.getItem('chatbranch_api_key')) && (
+                <div style={{ color: '#065f46', marginBottom: 8 }}>Client key stored ({localStorage.getItem('chatbranch_api_key') ? 'persisted' : 'session'})</div>
+              )}
+              {manageMessage && (
+                <div style={{ marginTop: 6, color: '#065f46' }}>{manageMessage}</div>
+              )}
+            </div>
+
+            <div className="modal-buttons" style={{ marginTop: 10, display: 'flex', justifyContent: 'flex-end' }}>
+              <button onClick={closeManageModels} className="confirm-btn" style={{ backgroundColor: '#667eea', color: '#fff', border: 'none', padding: '8px 12px' }}>Done</button>
             </div>
           </div>
         </div>
