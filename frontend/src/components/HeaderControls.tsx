@@ -21,7 +21,7 @@ interface HeaderControlsProps {
   onGoBack: () => void;
   canGoForward: boolean;
   onGoForward: () => void;
-  hasMessages?: boolean; // New prop to check if conversation has messages
+  hasMessages?: boolean;
 }
 
 const HeaderControls: React.FC<HeaderControlsProps> = ({
@@ -539,31 +539,31 @@ const HeaderControls: React.FC<HeaderControlsProps> = ({
           <div className="modal">
             <h3>🧩 Manage Models & Client Key</h3>
 
-            <div style={{ marginBottom: 12 }}>
-              <label style={{ display: 'block', marginBottom: 6 }}>Add Model</label>
-              <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ marginBottom: 8 }}>
+              <label style={{ display: 'block', marginBottom: 4, color: '#111' }}>Add Model (Openrouter)</label>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                 <input
                   type="text"
                   value={newModelValue}
                   onChange={(e) => setNewModelValue(e.target.value)}
-                  placeholder="enter model name e.g. openai/gpt-3.5-turbo"
-                  style={{ flex: 1 }}
+                  placeholder="E.g. google/gemma-3-27b-it:free"
+                  style={{ flex: 1, color: '#111', padding: '6px 8px' }}
                 />
-                <button onClick={handleAddModelInline} className="confirm-btn">Add</button>
+                <button onClick={handleAddModelInline} className="confirm-btn" style={{ backgroundColor: '#667eea', color: '#fff', border: 'none', padding: '6px 10px' }}>Add</button>
               </div>
             </div>
 
-            <div style={{ marginBottom: 12 }}>
-              <label style={{ display: 'block', marginBottom: 6 }}>Current Models</label>
-              <div style={{ maxHeight: 160, overflowY: 'auto' }}>
+            <div style={{ marginBottom: 8 }}>
+              <label style={{ display: 'block', marginBottom: 4, color: '#111' }}>Current Models</label>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, maxHeight: 120, overflowY: 'auto' }}>
                 {models.map(m => (
-                  <div key={m} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 0' }}>
+                  <div key={m} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', background: 'rgba(0,0,0,0.03)', borderRadius: 6 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <strong style={{ fontSize: '0.95em' }}>{m}</strong>
+                      <strong style={{ fontSize: '0.9em', color: '#111' }}>{m}</strong>
                       {m === selectedModel && <small style={{ color: '#666' }}> (selected)</small>}
                     </div>
                     <div>
-                      <button onClick={() => handleRemoveModelInline(m)} className="tiny-btn">Remove</button>
+                      <button onClick={() => handleRemoveModelInline(m)} className="tiny-btn" style={{ background: '#e5e7eb', color: '#111', border: 'none' }}>Remove</button>
                     </div>
                   </div>
                 ))}
@@ -572,33 +572,33 @@ const HeaderControls: React.FC<HeaderControlsProps> = ({
 
             <hr />
 
-            <div style={{ marginTop: 12 }}>
-              <label style={{ display: 'block', marginBottom: 6 }}>Client API Key</label>
+            <div style={{ marginTop: 8 }}>
+              <label style={{ display: 'block', marginBottom: 4, color: '#111' }}>Client API Key</label>
               <input
                 type="password"
                 value={keyInputValue}
                 onChange={(e) => setKeyInputValue(e.target.value)}
-                placeholder="Paste OpenRouter API key (client-only)"
-                style={{ width: '100%', marginBottom: 8 }}
+                placeholder="Paste OpenRouter API key"
+                style={{ width: '100%', marginBottom: 6, color: '#111', padding: '6px 8px' }}
               />
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#111' }}>
                   <input type="checkbox" checked={keyPersist} onChange={(e) => setKeyPersist(e.target.checked)} />
                   Persist across sessions
                 </label>
-                <button onClick={handleSaveKey} className="confirm-btn">Save Key</button>
-                <button onClick={handleClearKeyInline} className="cancel-btn">Clear</button>
+                <button onClick={handleSaveKey} className="confirm-btn" style={{ backgroundColor: '#667eea', color: '#fff', border: 'none', padding: '6px 10px' }}>Save Key</button>
+                <button onClick={handleClearKeyInline} className="cancel-btn" style={{ background: '#6b7280', color: '#fff', border: 'none', padding: '6px 10px' }}>Clear</button>
               </div>
               { (localStorage.getItem('chatbranch_api_key') || sessionStorage.getItem('chatbranch_api_key')) && (
-                <div style={{ color: '#0a7', marginBottom: 8 }}>Client key stored ({localStorage.getItem('chatbranch_api_key') ? 'persisted' : 'session'})</div>
+                <div style={{ color: '#065f46', marginBottom: 8 }}>Client key stored ({localStorage.getItem('chatbranch_api_key') ? 'persisted' : 'session'})</div>
               )}
               {manageMessage && (
-                <div style={{ marginTop: 8, color: '#0b5' }}>{manageMessage}</div>
+                <div style={{ marginTop: 6, color: '#065f46' }}>{manageMessage}</div>
               )}
             </div>
 
-            <div className="modal-buttons" style={{ marginTop: 14 }}>
-              <button onClick={closeManageModels} className="confirm-btn">Done</button>
+            <div className="modal-buttons" style={{ marginTop: 10, display: 'flex', justifyContent: 'flex-end' }}>
+              <button onClick={closeManageModels} className="confirm-btn" style={{ backgroundColor: '#667eea', color: '#fff', border: 'none', padding: '8px 12px' }}>Done</button>
             </div>
           </div>
         </div>
