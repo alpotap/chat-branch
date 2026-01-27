@@ -6,7 +6,7 @@ Transform your AI conversations with visual branching - like Git, but for chat. 
 
 ChatBranch lets you have non-linear conversations with AI models. Instead of a single thread of messages, you can branch your conversation at any point to explore alternative topics, approaches, or solutions. Think of it as version control for your thoughts and discussions.
 
-<!-- ![Hero placeholder](docs/screenshots/hero-placeholder.png) -->
+![Hero placeholder](docs/screenshots/banner_sample.png)
 
 
 ### Key Concepts
@@ -25,7 +25,7 @@ ChatBranch lets you have non-linear conversations with AI models. Instead of a s
 - **Branch colors** help distinguish different conversation paths in tree view
 - **Independent contexts** - each branch maintains its own conversation history
 
-![Conversation view placeholder](docs/screenshots/conversation-placeholder.png)
+![Conversation view placeholder](docs/screenshots/chat_view_sample.png)
 
 ### Intelligent Navigation
 - **Use ◀▶ (Back/Forward) system** for navigating between conversation states
@@ -39,7 +39,7 @@ ChatBranch lets you have non-linear conversations with AI models. Instead of a s
 - **Visual branch relationships** to understand conversation flow
 - **Zoom and pan** to navigate large conversation trees
 
-![Tree view placeholder](docs/screenshots/tree-placeholder.png)
+![Tree view placeholder](docs/screenshots/tree_view_sample.png)
 
 ### Multi-Model Integration
 - **Switch AI models** anytime during conversations
@@ -47,7 +47,7 @@ ChatBranch lets you have non-linear conversations with AI models. Instead of a s
 - **Model-specific capabilities** - use the right AI for the right task
 - **Seamless transitions** between different AI providers
 
-![Model selector placeholder](docs/screenshots/models-placeholder.png)
+<!-- ![Model selector placeholder](docs/screenshots/models-placeholder.png) -->
 
 ### Demo Mode
 - **Test without API costs** using built-in dummy responses
