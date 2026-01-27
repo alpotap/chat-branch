@@ -42,9 +42,6 @@ def check_user_setup():
             print("="*60)
             print("No users found in the database.")
             print("To create your first user, run:")
-            print("\n  Windows:")
-            print("    add_user.bat admin@123 admin123 --admin")
-            print("\n  Linux/Mac:")
             print("    python add_user.py admin@123 admin123 --admin")
             print("\n" + "="*60)
         else:

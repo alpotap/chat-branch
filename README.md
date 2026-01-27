@@ -1,20 +1,21 @@
 # ChatBranch - Git for Chat
 
-Transform your AI conversations with visual branching - like Git, but for chat. Start a conversation, then branch off at any point to explore different directions without losing context.
+Transform your AI conversations with visual branching - like Git, but for chat. Start a conversation, then branch off at any point to explore different directions while preserving context.
 
 ## What is ChatBranch?
 
 ChatBranch lets you have non-linear conversations with AI models. Instead of a single thread of messages, you can branch your conversation at any point to explore alternative topics, approaches, or solutions. Think of it as version control for your thoughts and discussions.
 
+![Hero placeholder](docs/screenshots/hero-placeholder.png)
+
+
 ### Key Concepts
 
 **🌳 Branching**: Create new conversation paths from any message without losing your original thread. Perfect for exploring "what if" scenarios or diving deeper into specific topics.
 
-**🎯 Navigation**: Built-in undo/redo system lets you navigate between different conversation states and branches effortlessly. Use the arrow buttons to step back and forward through your conversation history.
-
 **👁️ Visualization**: Switch between Chat view (traditional message interface) and Tree view (visual diagram) to see the full structure of your branched conversations.
 
-**🤖 Multi-Model Support**: Seamlessly switch between different AI models (GPT-3.5, GPT-4, Claude) mid-conversation to compare responses or leverage different AI strengths.
+**🤖 Multi-Model Support**: Seamlessly switch between different AI models mid-conversation to compare responses or leverage different AI strengths.
 
 ## Core Features
 
@@ -23,6 +24,9 @@ ChatBranch lets you have non-linear conversations with AI models. Instead of a s
 - **Name your branches** with descriptive labels for easy organization
 - **Branch colors** help distinguish different conversation paths in tree view
 - **Independent contexts** - each branch maintains its own conversation history
+
+![Conversation view placeholder](docs/screenshots/conversation-placeholder.png)
+
 
 ### Intelligent Navigation
 - **Use ◀▶ (Back/Forward) system** for navigating between conversation states
@@ -36,17 +40,20 @@ ChatBranch lets you have non-linear conversations with AI models. Instead of a s
 - **Visual branch relationships** to understand conversation flow
 - **Zoom and pan** to navigate large conversation trees
 
+![Tree view placeholder](docs/screenshots/tree-placeholder.png)
+
 ### Multi-Model Integration
 - **Switch AI models** anytime during conversations
 - **Compare responses** by branching and trying different models
 - **Model-specific capabilities** - use the right AI for the right task
 - **Seamless transitions** between different AI providers
 
+![Model selector placeholder](docs/screenshots/models-placeholder.png)
+
 ### Demo Mode
 - **Test without API costs** using built-in dummy responses
 - **Explore all features** before connecting your own API keys
 - **Perfect for learning** the branching workflow
-- **No setup required** - works out of the box
 
 ## How It Works
 
@@ -117,66 +124,50 @@ ChatBranch consists of a React frontend for the user interface and a FastAPI bac
 - **Within-conversation navigation** uses the built-in undo/redo system
 - **Bookmarkable conversations** - share specific conversation URLs
 
-## Getting Started
+## Tech Stack
 
-ChatBranch is currently in development mode.
+- **FastAPI** — Backend API (Python)
+- **React + TypeScript** — Frontend UI
+- **OpenRouter** — LLM gateway for model calls
+- **PostgreSQL** — Primary datastore (runs in Docker)
+- **SQLAlchemy** — ORM for DB models
+- **Docker** — Full Stack Deployment
+- **Nginx** — Static frontend serving / proxy
 
-### Demo Mode
-- **No API keys required** - test all features immediately
-- **Realistic dummy responses** simulate actual AI conversations
-- **Full functionality** including branching, navigation, and visualization
-- **Perfect for learning** how branching conversations work
+## Deployment (Docker)
 
-### OpenRouter-based LLM gateway (POC)
-- **Default gateway**: The backend now uses OpenRouter as the default LLM gateway.
-	Set `OPENROUTER_API_KEY` in `backend/.env` to enable real model calls from the server.
-- **Client key (POC)**: Advanced users can also paste an OpenRouter API key in the frontend (header "Set Key") for client-only, per-request use — the server does not persist client keys.
-- **Model selection**: Choose any OpenRouter-compatible model name (for example `openai/gpt-3.5-turbo`, `anthropic/claude-3.5`) from the model dropdown.
-- **No Litellm dependency**: The project now uses the official OpenRouter SDK in the backend.
-- **Demo fallback**: Keep `USE_DUMMY_RESPONSES=true` in `.env` to continue using demo responses without incurring API usage.
+Preferred deployment for developers is via Docker. For full technical details and alternative local development steps, see `QUICKSTART.md`.
 
-## Installation
+From the repository root run (recommended):
 
-See [QUICKSTART.md](QUICKSTART.md) for detailed developer setup instructions.
-
-Quick overview:
-1. **Clone the repository** and install dependencies
-2. **Set up PostgreSQL database** using provided scripts
-3. **Run backend and frontend** in separate terminals
-4. **Open browser** to http://localhost:3000
-
-### Fixing missing `is_active` columns
-
-If you see errors about missing `branches.is_active` or `messages.is_active` (for example when upgrading branches or running the frontend), you can run the provided helper to add those columns safely:
-
-From the repo root (uses the same DATABASE_URL your backend is configured with):
-
-PowerShell (venv):
-```powershell
-& "./venv/Scripts/Activate.ps1"
-python backend\database\ensure_is_active_columns.py
+```bash
+docker compose up --build -d
 ```
 
-Or, inside the running backend container:
-```powershell
-docker compose exec backend python backend/database/ensure_is_active_columns.py
+View logs:
+
+```bash
+docker compose logs -f frontend backend
 ```
 
-This is an idempotent helper intended as a stop-gap; for production use create a proper Alembic migration.
+Stop and remove containers:
 
-The application runs locally on your machine with full data privacy and control.
+```bash
+docker compose down
+```
 
-## Support and Development
+For full developer setup (venv, npm install, DB setup, and local server runs) see `QUICKSTART.md`.
 
-ChatBranch is actively developed with new features being added regularly. The focus is on creating the most intuitive and powerful tool for branching conversations with AI.
 
-### Current Status
-- ✅ **Visual branching** with right-click context menus
-- ✅ **Tree visualization** with interactive diagrams
-- ✅ **Navigation system** with undo/redo functionality
-- ✅ **OpenRouter LLM gateway (POC)** enabled — server uses `OPENROUTER_API_KEY` or frontend-provided keys
-- ✅ **Demo mode** for testing without API costs
-- 🔄 **Multi-user support** planned for future release
+
+## Support and Contributing
+
+This project is actively developed. For development setup and commands, follow `QUICKSTART.md`. Contributions and issues are welcome via GitHub.
+
+### Future Ideas
+- 📷 Document and Image upload support
+- 🔄 Multi-user support (like Google Docs for AI Chats!)
+- 📚Improved History Management for large contexts and long conversation chains
 
 ### Contributing
 The codebase is designed for extensibility and contribution. Key areas for development include additional AI model integrations, advanced visualization features, and collaborative conversation tools.
