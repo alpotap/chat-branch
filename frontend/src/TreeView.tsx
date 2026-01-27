@@ -122,7 +122,17 @@ const TreeView: React.FC<TreeViewProps> = ({
     const edges: Edge[] = [];
     const positions: Record<string, { x: number; y: number }> = {};
     const spacingX = 300;
-    const spacingY = 160;
+    const spacingYBase = 160;
+    const spacingAssistantToUser = 220; // larger gap between AI response and next human message
+    const spacingUserToAssistant = 120; // smaller gap between human message and AI response
+
+    function computeSpacing(parentId: string, childId: string) {
+      const parentRole = messages[parentId]?.role || '';
+      const childRole = messages[childId]?.role || '';
+      if (parentRole === 'assistant' && childRole === 'user') return spacingAssistantToUser;
+      if (parentRole === 'user' && childRole === 'assistant') return spacingUserToAssistant;
+      return spacingYBase;
+    }
     // Helper to recursively layout the tree
     function layoutTree(messageId: string, x: number, y: number, visited: Set<string>) {
       if (visited.has(messageId)) return x;
@@ -134,7 +144,8 @@ const TreeView: React.FC<TreeViewProps> = ({
       const childIds: string[] = (childrenRaw as any[]).map(child => typeof child === 'string' ? child : child.id);
       let currentX = x;
       childIds.forEach((childId, idx) => {
-        currentX = layoutTree(childId, currentX, y + spacingY, visited);
+        const deltaY = computeSpacing(messageId, childId);
+        currentX = layoutTree(childId, currentX, y + deltaY, visited);
         if (idx < childIds.length - 1) currentX += spacingX;
       });
       if (childIds.length > 1) {
@@ -226,9 +237,10 @@ const TreeView: React.FC<TreeViewProps> = ({
             }
           }
         });
+        const pendingDeltaY = lastMsgId ? computeSpacing(lastMsgId, pendingUserMessage.id) : spacingYBase;
         const pendingPos = lastMsgId ? {
           x: (positions[lastMsgId]?.x || 0),
-          y: (positions[lastMsgId]?.y || 0) + spacingY,
+          y: (positions[lastMsgId]?.y || 0) + pendingDeltaY,
         } : { x: 0, y: 0 };
         nodes.push({
           id: pendingUserMessage.id,

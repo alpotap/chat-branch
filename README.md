@@ -167,7 +167,8 @@ This project is actively developed. For development setup and commands, follow `
 ### Future Ideas
 - 📷 Document and Image upload support
 - 🔄 Multi-user support (like Google Docs for AI Chats!)
-- 📚Improved History Management for large contexts and long conversation chains
+- 📚 Improved History Management for large contexts and long conversation chains
+- 📈 Better use of React Flow!
 
 ### Contributing
 The codebase is designed for extensibility and contribution. Key areas for development include additional AI model integrations, advanced visualization features, and collaborative conversation tools.
