@@ -49,7 +49,7 @@ npm start
 ### Basic Usage
 - **Chat**: Type messages, get AI responses (dummy mode enabled)
 - **Branching**: Right-click any message → "Create Branch"
-- **Navigation**: Use ◀▶ buttons for undo/redo within conversations
+- **Navigation**: Use ◀▶ buttons for back/forward within conversations
 - **Views**: Toggle Chat/Tree view to see conversation structure
 - **Models**: Switch AI models mid-conversation
 

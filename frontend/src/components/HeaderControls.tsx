@@ -75,30 +75,7 @@ const HeaderControls: React.FC<HeaderControlsProps> = ({
     }
   }, [models]);
 
-  const addModel = useCallback(() => {
-    const m = window.prompt('Enter model name (example: openai/gpt-3.5-turbo)');
-    if (!m) return;
-    const name = m.trim();
-    if (!name) return;
-    if (models.includes(name)) {
-      window.alert('Model already exists');
-      return;
-    }
-    setModels(prev => {
-      const next = [...prev, name];
-      return next;
-    });
-    onModelChange(name);
-  }, [models, onModelChange]);
-
-  const removeModel = useCallback((name: string) => {
-    setModels(prev => {
-      const next = prev.filter(m => m !== name);
-      // If removing the selected model, switch to first available
-      if (name === selectedModel && next.length > 0) onModelChange(next[0]);
-      return next;
-    });
-  }, [selectedModel, onModelChange]);
+  
 
   const handleBranchChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
     onBranchChange(e.target.value);
@@ -210,34 +187,78 @@ const HeaderControls: React.FC<HeaderControlsProps> = ({
     setShowBranchManageDialog(false);
   }, []);
 
-  const setClientKey = useCallback(() => {
-    const key = window.prompt('Paste your API key (client-only storage).\nIt will be sent to the server for each request but not stored server-side.');
-    if (key) {
-      const persist = window.confirm('Persist this key across browser sessions? OK = persist (localStorage), Cancel = session only');
-      if (persist) localStorage.setItem('chatbranch_api_key', key);
-      else sessionStorage.setItem('chatbranch_api_key', key);
-      window.location.reload();
-    }
-  }, []);
+  // Manage Models & Client Key modal state
+  const [showManageModels, setShowManageModels] = useState(false);
+  const [newModelValue, setNewModelValue] = useState('');
+  const [manageMessage, setManageMessage] = useState<string | null>(null);
+  const [keyInputValue, setKeyInputValue] = useState('');
+  const [keyPersist, setKeyPersist] = useState<boolean>(true);
 
-  const clearClientKey = useCallback(() => {
+  useEffect(() => {
+    // initialize key input from storage when modal is opened
+    if (showManageModels) {
+      const stored = localStorage.getItem('chatbranch_api_key') || sessionStorage.getItem('chatbranch_api_key') || '';
+      setKeyInputValue(stored);
+      setKeyPersist(!!localStorage.getItem('chatbranch_api_key'));
+      setManageMessage(null);
+    }
+  }, [showManageModels]);
+
+  const openManageModels = useCallback(() => setShowManageModels(true), []);
+  const closeManageModels = useCallback(() => setShowManageModels(false), []);
+
+  const handleAddModelInline = useCallback(() => {
+    const name = newModelValue.trim();
+    if (!name) return setManageMessage('Model name cannot be empty');
+    if (models.includes(name)) return setManageMessage('Model already exists');
+    setModels(prev => {
+      const next = [...prev, name];
+      return next;
+    });
+    onModelChange(name);
+    setNewModelValue('');
+    setManageMessage(`Added model ${name}`);
+  }, [newModelValue, models, onModelChange]);
+
+  const handleRemoveModelInline = useCallback((name: string) => {
+    setModels(prev => {
+      const next = prev.filter(m => m !== name);
+      if (name === selectedModel && next.length > 0) onModelChange(next[0]);
+      return next;
+    });
+    setManageMessage(`Removed model ${name}`);
+  }, [selectedModel, onModelChange]);
+
+  const handleSaveKey = useCallback(() => {
+    if (!keyInputValue) {
+      // clear
+      sessionStorage.removeItem('chatbranch_api_key');
+      localStorage.removeItem('chatbranch_api_key');
+      setManageMessage('Cleared client key');
+      return;
+    }
+    if (keyPersist) {
+      localStorage.setItem('chatbranch_api_key', keyInputValue);
+      sessionStorage.removeItem('chatbranch_api_key');
+    } else {
+      sessionStorage.setItem('chatbranch_api_key', keyInputValue);
+      localStorage.removeItem('chatbranch_api_key');
+    }
+    setManageMessage('Saved client key');
+  }, [keyInputValue, keyPersist]);
+
+  const handleClearKeyInline = useCallback(() => {
     sessionStorage.removeItem('chatbranch_api_key');
     localStorage.removeItem('chatbranch_api_key');
-    window.location.reload();
+    setKeyInputValue('');
+    setKeyPersist(true);
+    setManageMessage('Cleared client key');
   }, []);
 
   return (
     <div className="header">
       <div className="header-left">
         <h1>🌳 ChatBranch</h1>
-        <button
-          onClick={setClientKey}
-          className="small-btn"
-          title="Quick add client API key"
-          style={{ marginLeft: '8px' }}
-        >
-          🔐 Key
-        </button>
         <div className="navigation-buttons">
           <button 
             onClick={onGoBack}
@@ -325,26 +346,7 @@ const HeaderControls: React.FC<HeaderControlsProps> = ({
               <option key={m} value={m}>{m}</option>
             ))}
           </select>
-          <button onClick={addModel} title="Add model" className="small-btn" style={{ marginLeft: 8 }}>＋ Model</button>
-        </div>
-        {/* Simple model list manager for removing models */}
-        {models.length > 1 && (
-          <div style={{ display: 'inline-block', marginLeft: 10 }}>
-            {models.map(m => (
-              <span key={m} style={{ marginRight: 8, display: 'inline-flex', alignItems: 'center' }}>
-                <small style={{ color: '#666', marginRight: 4 }}>{m}</small>
-                <button onClick={() => removeModel(m)} title={`Remove ${m}`} className="tiny-btn">✖</button>
-              </span>
-            ))}
-          </div>
-        )}
-        {/* Simple client-key manager (POC): store key in sessionStorage or localStorage */}
-        <div className="client-key-controls" style={{ display: 'inline-block', marginLeft: '12px' }}>
-          <button onClick={setClientKey} title="Add client API key" className="small-btn">🔑 Set Key</button>
-          <button onClick={clearClientKey} title="Clear client API key" className="small-btn" style={{ marginLeft: '6px' }}>❌ Clear Key</button>
-          { (sessionStorage.getItem('chatbranch_api_key') || localStorage.getItem('chatbranch_api_key')) && (
-            <span style={{ marginLeft: '8px', color: '#0b5', fontWeight: 600 }}>Client Key Active</span>
-          )}
+          <button onClick={openManageModels} title="Manage models & client key" className="small-btn" style={{ marginLeft: 8 }}>Manage Models</button>
         </div>
         
         {/* User info and logout */}
@@ -526,6 +528,77 @@ const HeaderControls: React.FC<HeaderControlsProps> = ({
               >
                 Cancel
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Manage Models & Client Key Modal */}
+      {showManageModels && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <h3>🧩 Manage Models & Client Key</h3>
+
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ display: 'block', marginBottom: 6 }}>Add Model</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input
+                  type="text"
+                  value={newModelValue}
+                  onChange={(e) => setNewModelValue(e.target.value)}
+                  placeholder="enter model name e.g. openai/gpt-3.5-turbo"
+                  style={{ flex: 1 }}
+                />
+                <button onClick={handleAddModelInline} className="confirm-btn">Add</button>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ display: 'block', marginBottom: 6 }}>Current Models</label>
+              <div style={{ maxHeight: 160, overflowY: 'auto' }}>
+                {models.map(m => (
+                  <div key={m} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 0' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <strong style={{ fontSize: '0.95em' }}>{m}</strong>
+                      {m === selectedModel && <small style={{ color: '#666' }}> (selected)</small>}
+                    </div>
+                    <div>
+                      <button onClick={() => handleRemoveModelInline(m)} className="tiny-btn">Remove</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <hr />
+
+            <div style={{ marginTop: 12 }}>
+              <label style={{ display: 'block', marginBottom: 6 }}>Client API Key</label>
+              <input
+                type="password"
+                value={keyInputValue}
+                onChange={(e) => setKeyInputValue(e.target.value)}
+                placeholder="Paste OpenRouter API key (client-only)"
+                style={{ width: '100%', marginBottom: 8 }}
+              />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <input type="checkbox" checked={keyPersist} onChange={(e) => setKeyPersist(e.target.checked)} />
+                  Persist across sessions
+                </label>
+                <button onClick={handleSaveKey} className="confirm-btn">Save Key</button>
+                <button onClick={handleClearKeyInline} className="cancel-btn">Clear</button>
+              </div>
+              { (localStorage.getItem('chatbranch_api_key') || sessionStorage.getItem('chatbranch_api_key')) && (
+                <div style={{ color: '#0a7', marginBottom: 8 }}>Client key stored ({localStorage.getItem('chatbranch_api_key') ? 'persisted' : 'session'})</div>
+              )}
+              {manageMessage && (
+                <div style={{ marginTop: 8, color: '#0b5' }}>{manageMessage}</div>
+              )}
+            </div>
+
+            <div className="modal-buttons" style={{ marginTop: 14 }}>
+              <button onClick={closeManageModels} className="confirm-btn">Done</button>
             </div>
           </div>
         </div>

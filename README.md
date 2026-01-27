@@ -25,7 +25,7 @@ ChatBranch lets you have non-linear conversations with AI models. Instead of a s
 - **Independent contexts** - each branch maintains its own conversation history
 
 ### Intelligent Navigation
-- **Undo/Redo system** for navigating between conversation states
+- **Use ◀▶ (Back/Forward) system** for navigating between conversation states
 - **Branch switching** to jump between different conversation paths
 - **Message selection** to resume conversations from specific points
 - **Conversation persistence** - all your work is automatically saved
@@ -119,7 +119,7 @@ ChatBranch consists of a React frontend for the user interface and a FastAPI bac
 
 ## Getting Started
 
-ChatBranch is currently in development mode with full LLM integration coming soon. You can explore all features using the built-in demo mode.
+ChatBranch is currently in development mode.
 
 ### Demo Mode
 - **No API keys required** - test all features immediately
