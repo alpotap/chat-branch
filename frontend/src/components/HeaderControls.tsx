@@ -95,6 +95,24 @@ const HeaderControls: React.FC<HeaderControlsProps> = ({
     }
   }, [models]);
 
+  // Models installed in the Ollama instance on the Docker host (not persisted - always live)
+  const [ollamaModels, setOllamaModels] = useState<string[]>([]);
+
+  const refreshOllamaModels = useCallback(async () => {
+    try {
+      const res = await axios.get(`${API_BASE}/models/ollama`);
+      setOllamaModels(Array.isArray(res.data?.models) ? res.data.models : []);
+      return res.data;
+    } catch (e) {
+      setOllamaModels([]);
+      return null;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (user) refreshOllamaModels();
+  }, [user, refreshOllamaModels]);
+
   
 
   const handleBranchChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -250,6 +268,15 @@ const HeaderControls: React.FC<HeaderControlsProps> = ({
     setManageMessage(`Removed model ${name}`);
   }, [selectedModel, onModelChange]);
 
+  const handleRefreshOllama = useCallback(async () => {
+    const data = await refreshOllamaModels();
+    if (!data || !data.available) {
+      setManageMessage(`Ollama not reachable at ${data?.base_url || 'the configured URL'}`);
+    } else {
+      setManageMessage(`Found ${data.models?.length || 0} Ollama model(s)`);
+    }
+  }, [refreshOllamaModels]);
+
   const handleSaveKey = useCallback(() => {
     if (!keyInputValue) {
       // clear
@@ -366,6 +393,13 @@ const HeaderControls: React.FC<HeaderControlsProps> = ({
             {models.map(m => (
               <option key={m} value={m}>{m}</option>
             ))}
+            {ollamaModels.length > 0 && (
+              <optgroup label="Ollama (local)">
+                {ollamaModels.map(m => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </optgroup>
+            )}
           </select>
           <button onClick={openManageModels} title="Manage models & client key" className="small-btn" style={{ marginLeft: 8 }}>Manage Models</button>
         </div>
@@ -589,6 +623,23 @@ const HeaderControls: React.FC<HeaderControlsProps> = ({
                   </div>
                 ))}
               </div>
+            </div>
+
+            <hr />
+
+            <div style={{ marginTop: 8 }}>
+              <label style={{ display: 'block', marginBottom: 4, color: '#111' }}>Ollama Models (host)</label>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, maxHeight: 120, overflowY: 'auto', marginBottom: 6 }}>
+                {ollamaModels.length === 0 ? (
+                  <small style={{ color: '#666' }}>No Ollama models detected. Make sure Ollama is running on the host and listening on 0.0.0.0.</small>
+                ) : ollamaModels.map(m => (
+                  <div key={m} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', background: 'rgba(0,0,0,0.03)', borderRadius: 6 }}>
+                    <strong style={{ fontSize: '0.9em', color: '#111' }}>{m}</strong>
+                    {m === selectedModel && <small style={{ color: '#666' }}> (selected)</small>}
+                  </div>
+                ))}
+              </div>
+              <button onClick={handleRefreshOllama} className="small-btn" style={{ padding: '6px 10px' }}>Refresh Ollama Models</button>
             </div>
 
             <hr />

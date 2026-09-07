@@ -10,14 +10,42 @@ Easy Docker setup for ChatBranch testing with friends and developers.
 
 ### 1. Setup Environment
 ```bash
-# The backend and frontend already have .env files configured
-# For Docker deployment with real LLM responses, edit backend/.env:
+# .env files are not committed - create the backend one from the template:
+cp backend/.env.example backend/.env      # PowerShell: Copy-Item backend\.env.example backend\.env
+
+# For real LLM responses, edit backend/.env:
 # Set USE_DUMMY_RESPONSES=false
 # Set OPENROUTER_API_KEY=your_actual_openrouter_api_key_here
 
 # For Docker deployment, uncomment this line in frontend/.env:
 # REACT_APP_API_BASE=/api
 ```
+
+> The database is provided by the `postgres` container - no local PostgreSQL install is needed.
+> Compose overrides `DATABASE_URL` to point at that container. If port 5432 is already taken by a
+> local PostgreSQL server, change the `postgres` port mapping in `docker-compose.yml` (e.g. `"5433:5432"`).
+
+### 1b. Use Ollama models from the host (optional)
+
+The backend can talk to the Ollama installation running on your Windows host through
+`host.docker.internal`. Ollama binds to `127.0.0.1` by default, which containers cannot reach, so
+tell it to listen on all interfaces:
+
+```powershell
+# Set once, then restart Ollama (quit it from the tray and start it again)
+[Environment]::SetEnvironmentVariable("OLLAMA_HOST", "0.0.0.0:11434", "User")
+```
+
+Verify from inside the container after startup:
+
+```bash
+docker compose exec backend python -c "import urllib.request;print(urllib.request.urlopen('http://host.docker.internal:11434/api/tags').read()[:200])"
+```
+
+Installed Ollama models then appear in the model dropdown under **Ollama (local)** as
+`ollama/<name>` (e.g. `ollama/llama3.2:latest`) and work regardless of `USE_DUMMY_RESPONSES`
+since they need no API key. Use **Manage Models → Refresh Ollama Models** after pulling new ones.
+Override the endpoint with `OLLAMA_BASE_URL` if Ollama runs elsewhere.
 
 ### 2. Start Services
 ```bash

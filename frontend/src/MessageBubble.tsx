@@ -1,4 +1,6 @@
 import React, { useState, memo, useCallback } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { getBranchColor as getUtilBranchColor, getBranchColorFromTree, getRandomBranchColor, BRANCH_COLORS } from './utils/branchColors';
 import { generateUniqueBranchName } from './utils/branchNaming';
 import ContextMenu from './components/ContextMenu';
@@ -53,6 +55,18 @@ const MessageBubble = memo<MessageBubbleProps>(({
   const [showBranchDialog, setShowBranchDialog] = useState(false);
   const [branchName, setBranchName] = useState('');
   const [showRegenBranchDialog, setShowRegenBranchDialog] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(message.content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch (err) {
+      console.error('Failed to copy message:', err);
+    }
+  }, [message.content]);
 
   const handleCloseContextMenu = () => {
     setContextMenuMessage(null);
@@ -201,10 +215,13 @@ const MessageBubble = memo<MessageBubbleProps>(({
             {new Date(message.created_at).toLocaleTimeString()}
           </span>
         </div>
-        <div className="content">
-          {message.content}
-          {error && (
-            <div className="message-error" style={{ color: '#e53e3e', marginTop: 8, fontSize: '0.95em' }}>
+        <div className={`content ${message.role === 'assistant' ? 'markdown' : ''}`}>
+          {message.role === 'assistant' ? (
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+          ) : (
+            message.content
+          )}
+          {error && (            <div className="message-error" style={{ color: '#e53e3e', marginTop: 8, fontSize: '0.95em' }}>
               <span>❌ {error}</span>
               {onRetrySendMessage && (
                 <button
@@ -225,6 +242,11 @@ const MessageBubble = memo<MessageBubbleProps>(({
               )}
             </div>
           )}
+        </div>
+        <div className="message-actions">
+          <button className="copy-btn" onClick={handleCopy} title="Copy message to clipboard">
+            {copied ? '✓ Copied' : '⧉ Copy'}
+          </button>
         </div>
       </div>
 

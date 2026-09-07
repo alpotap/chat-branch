@@ -115,6 +115,11 @@ async def get_current_user(
 async def root():
     return {"message": "ChatBranch API is running"}
 
+@app.get("/models/ollama")
+async def list_ollama_models(current_user: User = Depends(get_current_user)):
+    """List models installed in the Ollama instance running on the Docker host"""
+    return await llm_service.list_ollama_models()
+
 # Authentication routes
 @app.post("/auth/login", response_model=LoginResponse)
 async def login(user_credentials: UserLogin, db: Session = Depends(get_db)):

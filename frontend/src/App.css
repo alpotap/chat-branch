@@ -9,27 +9,29 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 1rem 2rem;
+  padding: 0.25rem 0.6rem;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
-  box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.12);
+  font-size: 0.85rem;
+  flex-shrink: 0;
 }
 
 .header-left {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: 0.4rem;
 }
 
 .navigation-buttons {
   display: flex;
-  gap: 0.5rem;
+  gap: 0.25rem;
   align-items: center;
 }
 
 .undo-btn, .redo-btn {
-  width: 32px;
-  height: 32px;
+  width: 22px;
+  height: 22px;
   padding: 0;
   background-color: rgba(255,255,255,0.2);
   color: white;
@@ -37,7 +39,7 @@
   border-radius: 50%;
   cursor: pointer;
   transition: all 0.2s ease;
-  font-size: 14px;
+  font-size: 11px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -61,24 +63,27 @@
 
 .header h1 {
   margin: 0;
-  font-size: 1.8rem;
+  font-size: 1rem;
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .controls {
   display: flex;
-  gap: 1rem;
+  gap: 0.35rem;
   align-items: center;
 }
 
 .controls button {
-  padding: 0.5rem 1rem;
+  padding: 0.2rem 0.5rem;
   background-color: rgba(255,255,255,0.2);
   color: white;
   border: 1px solid rgba(255,255,255,0.3);
-  border-radius: 6px;
+  border-radius: 4px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background-color 0.15s ease;
+  font-size: 0.8rem;
+  line-height: 1.3;
 }
 
 .controls button:hover {
@@ -91,18 +96,19 @@
 }
 
 .branch-selector, .controls select {
-  padding: 0.5rem;
+  padding: 0.15rem 0.3rem;
   border: 1px solid rgba(255,255,255,0.3);
-  border-radius: 6px;
+  border-radius: 4px;
   background-color: rgba(255,255,255,0.1);
   color: white;
-  min-width: 120px;
+  min-width: 100px;
+  font-size: 0.8rem;
 }
 
 .branch-selector option, .controls select option {
   background-color: #4b5563;
   color: white;
-  padding: 0.5rem;
+  padding: 0.2rem;
 }
 
 .branch-selector:focus, .controls select:focus {
@@ -115,31 +121,32 @@
 .user-controls {
   display: flex;
   align-items: center;
-  gap: 1rem;
-  padding-left: 1rem;
+  gap: 0.4rem;
+  padding-left: 0.5rem;
   border-left: 1px solid rgba(255,255,255,0.3);
 }
 
 .user-info {
-  font-size: 0.9rem;
+  font-size: 0.78rem;
   color: rgba(255,255,255,0.9);
+  white-space: nowrap;
 }
 
 .admin-badge {
-  font-size: 0.8rem;
+  font-size: 0.72rem;
   color: #ffd700;
   font-weight: 600;
 }
 
 .logout-btn {
-  padding: 0.4rem 0.8rem;
+  padding: 0.15rem 0.45rem;
   background-color: rgba(255,255,255,0.15);
   color: white;
   border: 1px solid rgba(255,255,255,0.3);
-  border-radius: 6px;
+  border-radius: 4px;
   cursor: pointer;
-  transition: all 0.2s ease;
-  font-size: 0.9rem;
+  transition: background-color 0.15s ease;
+  font-size: 0.78rem;
 }
 
 .logout-btn:hover {
@@ -167,36 +174,61 @@
 }
 
 .sidebar {
-  width: 250px;
+  width: 210px;
   background-color: #f8f9fa;
   border-right: 1px solid #ddd;
-  padding: 1rem;
+  padding: 0.4rem;
   overflow-y: auto;
+  flex-shrink: 0;
+  transition: width 0.15s ease, padding 0.15s ease;
+}
+
+.sidebar.collapsed {
+  width: 32px;
+  padding: 0.3rem 0.2rem;
+  overflow: hidden;
+}
+
+.sidebar-toggle-btn {
+  background: none;
+  border: 1px solid #d5d8dc;
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 0 0.25rem;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: #555;
+}
+
+.sidebar-toggle-btn:hover {
+  background-color: #e9ecef;
 }
 
 .sidebar-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 1rem;
-  padding-bottom: 0.5rem;
+  gap: 0.25rem;
+  margin-bottom: 0.4rem;
+  padding-bottom: 0.3rem;
   border-bottom: 1px solid #e0e0e0;
 }
 
 .sidebar-header h3 {
   margin: 0;
   color: #333;
+  font-size: 0.85rem;
 }
 
 .new-conversation-btn {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
   border: none;
-  padding: 0.5rem 1rem;
-  border-radius: 6px;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
   cursor: pointer;
-  font-size: 0.9rem;
-  transition: all 0.2s ease;
+  font-size: 0.78rem;
+  transition: box-shadow 0.15s ease;
 }
 
 .new-conversation-btn:hover {
@@ -210,14 +242,14 @@
 }
 
 .conversation-item {
-  padding: 0.75rem;
-  margin-bottom: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  margin-bottom: 0.2rem;
   background-color: white;
   border: 1px solid #ddd;
-  border-radius: 8px;
+  border-radius: 5px;
   cursor: pointer;
-  font-size: 0.9rem;
-  transition: all 0.2s ease;
+  font-size: 0.82rem;
+  transition: background-color 0.15s ease;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -226,8 +258,6 @@
 
 .conversation-item:hover {
   background-color: #e9ecef;
-  transform: translateY(-1px);
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
 .conversation-item.active {
@@ -306,30 +336,31 @@
 }
 
 .branch-info {
-  padding: 0.75rem 1rem;
+  padding: 0.25rem 0.5rem;
   background-color: #f8f9fa;
   border-bottom: 1px solid #ddd;
-  font-size: 0.9rem;
+  font-size: 0.78rem;
   color: #666;
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-shrink: 0;
 }
 
 .branch-name-container {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.35rem;
 }
 
 /* Messages container with proper scrolling */
 .messages {
   flex: 1;
   overflow-y: auto;
-  padding: 1rem;
+  padding: 0.5rem;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.35rem;
 }
 
 /* Ensure message bubbles clear floats properly */
@@ -341,7 +372,7 @@
 
 /* Pagination controls styling */
 .pagination-controls {
-  padding: 1rem;
+  padding: 0.3rem;
   text-align: center;
   border-top: 1px solid #ddd;
   background-color: #f8f9fa;
@@ -349,12 +380,13 @@
 }
 
 .pagination-controls button {
-  padding: 0.5rem 1rem;
+  padding: 0.2rem 0.6rem;
   background-color: #667eea;
   color: white;
   border: none;
-  border-radius: 6px;
+  border-radius: 4px;
   cursor: pointer;
+  font-size: 0.78rem;
   transition: background-color 0.2s ease;
 }
 
@@ -398,12 +430,12 @@
 
 /* Message Bubble Styles */
 .message-bubble {
-  margin-bottom: 1rem;
-  padding: 1rem;
-  border-radius: 12px;
-  max-width: 70%;
+  margin-bottom: 0.35rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 8px;
+  max-width: 78%;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: box-shadow 0.15s ease;
   position: relative;
   display: block;
 }
@@ -449,25 +481,25 @@
 
 .message-header {
   display: flex;
-  gap: 0.5rem;
-  margin-bottom: 0.5rem;
-  font-size: 0.8rem;
+  gap: 0.35rem;
+  margin-bottom: 0.25rem;
+  font-size: 0.7rem;
   align-items: center;
 }
 
 .message-header .role {
   font-weight: bold;
   text-transform: capitalize;
-  padding: 0.2rem 0.4rem;
-  border-radius: 4px;
+  padding: 0.05rem 0.3rem;
+  border-radius: 3px;
   background-color: rgba(0,0,0,0.1);
 }
 
 .branch-tag {
   color: white;
-  padding: 0.2rem 0.6rem;
-  border-radius: 12px;
-  font-size: 0.75rem;
+  padding: 0.05rem 0.45rem;
+  border-radius: 10px;
+  font-size: 0.68rem;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -527,12 +559,13 @@
 .context-menu button {
   display: block;
   width: 100%;
-  padding: 0.75rem 1rem;
+  padding: 0.35rem 0.7rem;
   text-align: left;
   border: none;
   background: none;
   cursor: pointer;
-  transition: background-color 0.2s ease;
+  font-size: 0.82rem;
+  transition: background-color 0.15s ease;
 }
 
 .context-menu button:hover {
@@ -555,8 +588,8 @@
 
 .modal {
   background: white;
-  padding: 2rem;
-  border-radius: 12px;
+  padding: 1rem;
+  border-radius: 10px;
   box-shadow: 0 10px 30px rgba(0,0,0,0.3);
   max-width: 400px;
   width: 90%;
@@ -564,35 +597,56 @@
 
 .modal h3 {
   margin-top: 0;
+  margin-bottom: 0.5rem;
+  font-size: 1rem;
   color: #333;
 }
 
 .modal p {
   color: #333;
-  margin: 1rem 0;
+  margin: 0.5rem 0;
 }
 
 .modal input {
   width: 100%;
-  padding: 0.75rem;
+  padding: 0.4rem 0.55rem;
   border: 1px solid #ddd;
-  border-radius: 6px;
-  margin: 1rem 0;
-  font-size: 1rem;
+  border-radius: 5px;
+  margin: 0.5rem 0;
+  font-size: 0.9rem;
 }
 
 .modal-buttons {
   display: flex;
-  gap: 1rem;
+  gap: 0.5rem;
   justify-content: flex-end;
 }
 
 .modal-buttons button {
-  padding: 0.75rem 1.5rem;
+  padding: 0.35rem 0.9rem;
   border: none;
-  border-radius: 6px;
+  border-radius: 5px;
+  font-size: 0.85rem;
   cursor: pointer;
   transition: all 0.2s ease;
+}
+
+/* Compact auxiliary buttons */
+.small-btn {
+  padding: 0.15rem 0.45rem;
+  font-size: 0.78rem;
+  border-radius: 4px;
+  border: 1px solid rgba(255,255,255,0.3);
+  background-color: rgba(255,255,255,0.15);
+  color: inherit;
+  cursor: pointer;
+}
+
+.tiny-btn {
+  padding: 0.05rem 0.35rem;
+  font-size: 0.72rem;
+  border-radius: 3px;
+  cursor: pointer;
 }
 
 .modal-buttons button:first-child {
@@ -766,33 +820,35 @@
 
 .input-area {
   display: flex;
-  padding: 1rem;
+  padding: 0.4rem 0.5rem;
   background-color: #f8f9fa;
   border-top: 1px solid #ddd;
-  gap: 1rem;
+  gap: 0.5rem;
+  flex-shrink: 0;
 }
 
 .input-area textarea {
   flex: 1;
-  padding: 0.75rem;
+  padding: 0.35rem 0.5rem;
   border: 1px solid #ddd;
-  border-radius: 8px;
+  border-radius: 6px;
   resize: vertical;
-  min-height: 60px;
-  max-height: 120px;
+  min-height: 34px;
+  max-height: 140px;
   font-family: inherit;
-  font-size: 1rem;
+  font-size: 0.9rem;
 }
 
 .input-area button {
-  padding: 0.75rem 1.5rem;
+  padding: 0.35rem 0.9rem;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
   border: none;
-  border-radius: 8px;
+  border-radius: 6px;
   cursor: pointer;
+  font-size: 0.85rem;
   align-self: flex-end;
-  transition: all 0.2s ease;
+  transition: box-shadow 0.15s ease;
 }
 
 .input-area button:hover:not(:disabled) {
@@ -1027,20 +1083,20 @@
 .branch-controls {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.3rem;
 }
 
 .manage-branch-btn {
   background: #667eea;
   color: white;
   border: none;
-  padding: 0.5rem 0.75rem;
+  padding: 0.1rem 0.4rem;
   border-radius: 4px;
   cursor: pointer;
-  font-size: 1rem;
-  transition: all 0.2s ease;
-  min-width: 40px;
-  height: 35px;
+  font-size: 0.8rem;
+  transition: background 0.15s ease;
+  min-width: 26px;
+  height: 22px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1048,22 +1104,20 @@
 
 .manage-branch-btn:hover {
   background: #5a67d8;
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
 }
 
 .delete-branch-btn {
   background: #dc3545;
   color: white;
   border: none;
-  padding: 0.5rem 0.75rem;
+  padding: 0.1rem 0.4rem;
   border-radius: 4px;
   cursor: pointer;
-  font-size: 1rem;
-  transition: all 0.2s ease;
-  margin-left: 0.5rem;
-  min-width: 40px;
-  height: 35px;
+  font-size: 0.8rem;
+  transition: background 0.15s ease;
+  margin-left: 0.25rem;
+  min-width: 26px;
+  height: 22px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1071,8 +1125,6 @@
 
 .delete-branch-btn:hover {
   background: #c82333;
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(220, 53, 69, 0.3);
 }
 
 /* Edit Modal Styles */
@@ -1119,6 +1171,178 @@
   opacity: 0.5;
   cursor: not-allowed;
   background-color: #e9ecef;
+}
+
+/* Markdown rendering inside message bubbles */
+.content.markdown {
+  white-space: normal;
+}
+
+.content.markdown > *:first-child {
+  margin-top: 0;
+}
+
+.content.markdown > *:last-child {
+  margin-bottom: 0;
+}
+
+.content.markdown p {
+  margin: 0.35rem 0;
+}
+
+.content.markdown h1,
+.content.markdown h2,
+.content.markdown h3,
+.content.markdown h4 {
+  margin: 0.5rem 0 0.3rem;
+  line-height: 1.25;
+}
+
+.content.markdown h1 { font-size: 1.15rem; }
+.content.markdown h2 { font-size: 1.05rem; }
+.content.markdown h3 { font-size: 0.98rem; }
+.content.markdown h4 { font-size: 0.92rem; }
+
+.content.markdown ul,
+.content.markdown ol {
+  margin: 0.3rem 0;
+  padding-left: 1.2rem;
+}
+
+.content.markdown li {
+  margin: 0.1rem 0;
+}
+
+.content.markdown code {
+  background-color: rgba(0,0,0,0.08);
+  padding: 0.05rem 0.25rem;
+  border-radius: 3px;
+  font-family: 'Cascadia Code', Consolas, monospace;
+  font-size: 0.85em;
+}
+
+.content.markdown pre {
+  background-color: rgba(0,0,0,0.06);
+  padding: 0.5rem;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 0.4rem 0;
+}
+
+.content.markdown pre code {
+  background: none;
+  padding: 0;
+}
+
+.content.markdown blockquote {
+  margin: 0.4rem 0;
+  padding-left: 0.6rem;
+  border-left: 3px solid rgba(0,0,0,0.15);
+  opacity: 0.9;
+}
+
+.content.markdown table {
+  border-collapse: collapse;
+  margin: 0.4rem 0;
+  font-size: 0.9em;
+  display: block;
+  overflow-x: auto;
+}
+
+.content.markdown th,
+.content.markdown td {
+  border: 1px solid rgba(0,0,0,0.15);
+  padding: 0.2rem 0.4rem;
+  text-align: left;
+}
+
+.content.markdown hr {
+  border: none;
+  border-top: 1px solid rgba(0,0,0,0.15);
+  margin: 0.5rem 0;
+}
+
+.message-bubble.user .content.markdown code,
+.message-bubble.user .content.markdown pre {
+  background-color: rgba(255,255,255,0.18);
+}
+
+.message-bubble.user .content.markdown blockquote {
+  border-left-color: rgba(255,255,255,0.5);
+}
+
+/* Copy to clipboard */
+.message-actions {
+  display: flex;
+  gap: 0.3rem;
+  margin-top: 0.25rem;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.message-bubble.user .message-actions {
+  justify-content: flex-end;
+}
+
+.message-bubble:hover .message-actions,
+.message-bubble.selected .message-actions {
+  opacity: 1;
+}
+
+.copy-btn {
+  background: rgba(0,0,0,0.06);
+  border: 1px solid rgba(0,0,0,0.1);
+  color: inherit;
+  border-radius: 4px;
+  padding: 0.05rem 0.4rem;
+  font-size: 0.7rem;
+  cursor: pointer;
+  line-height: 1.5;
+}
+
+.copy-btn:hover {
+  background: rgba(0,0,0,0.12);
+}
+
+.message-bubble.user .copy-btn {
+  background: rgba(255,255,255,0.2);
+  border-color: rgba(255,255,255,0.35);
+}
+
+.message-bubble.user .copy-btn:hover {
+  background: rgba(255,255,255,0.32);
+}
+
+/* Scroll to bottom */
+.messages-wrapper {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.scroll-to-bottom-btn {
+  position: absolute;
+  right: 1rem;
+  bottom: 0.75rem;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid #d0d4da;
+  background: #ffffff;
+  color: #444;
+  font-size: 0.9rem;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+
+.scroll-to-bottom-btn:hover {
+  background: #f1f3f5;
 }
 
 .modal-buttons-vertical button .button-subtitle {

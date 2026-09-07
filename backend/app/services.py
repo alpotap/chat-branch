@@ -911,6 +911,9 @@ class LLMService:
     def __init__(self):
         # Configuration - set USE_DUMMY_RESPONSES=false in .env to use real LLMs
         self.use_dummy_responses = os.getenv("USE_DUMMY_RESPONSES", "true").lower() == "true"
+
+        # Ollama running on the Docker host (Docker Desktop resolves host.docker.internal)
+        self.ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://host.docker.internal:11434").rstrip("/")
         
         # No environment mutation; use OPENROUTER_API_KEY as server default
         # Client-provided per-request keys are accepted via `client_api_key` argument
@@ -952,6 +955,10 @@ class LLMService:
         # If explicitly requesting demo responses via the special model id, always use dummy generator
         if model == "demo-response":
             return await self._generate_dummy_response(context, model)
+
+        # Local Ollama models need no API key, so they bypass the dummy-response switch
+        if self.is_ollama_model(model):
+            return await self._call_ollama(context=context, model=model, **options)
 
         use_dummy = os.getenv("USE_DUMMY_RESPONSES", "true").lower() == "true"
         if use_dummy:
@@ -1001,6 +1008,59 @@ class LLMService:
             print(f"❌ Error calling OpenRouter: {e}")
             raise
     
+    @staticmethod
+    def is_ollama_model(model: str) -> bool:
+        return isinstance(model, str) and model.startswith("ollama/")
+
+    async def list_ollama_models(self) -> Dict[str, Any]:
+        """List models installed in the host's Ollama instance."""
+        url = f"{self.ollama_base_url}/api/tags"
+        try:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=5)) as session:
+                async with session.get(url) as resp:
+                    resp.raise_for_status()
+                    data = await resp.json()
+            models = [f"ollama/{m['model']}" for m in data.get("models", []) if m.get("model")]
+            return {"available": True, "base_url": self.ollama_base_url, "models": models, "error": None}
+        except Exception as e:
+            print(f"⚠️ Could not reach Ollama at {self.ollama_base_url}: {e}")
+            return {"available": False, "base_url": self.ollama_base_url, "models": [], "error": str(e)}
+
+    async def _call_ollama(self, context: List[Dict], model: str, **options: Any) -> str:
+        """Call the host's Ollama chat API for models selected as `ollama/<name>`."""
+        ollama_model = model.split("/", 1)[1]
+
+        messages = []
+        for msg in context:
+            role = msg.get("role")
+            if role not in ("user", "assistant", "system"):
+                role = "user" if role == "model" else "assistant"
+            messages.append({"role": role, "content": msg["content"]})
+
+        payload: Dict[str, Any] = {
+            "model": ollama_model,
+            "messages": messages,
+            "stream": False,
+            "options": {"temperature": options.get("temperature", 0.7)},
+        }
+        if options.get("max_tokens"):
+            payload["options"]["num_predict"] = options["max_tokens"]
+
+        try:
+            timeout = aiohttp.ClientTimeout(total=float(os.getenv("OLLAMA_TIMEOUT", "300")))
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(f"{self.ollama_base_url}/api/chat", json=payload) as resp:
+                    if resp.status != 200:
+                        raise Exception(f"Ollama returned {resp.status}: {await resp.text()}")
+                    data = await resp.json()
+            content = (data.get("message") or {}).get("content")
+            if not content:
+                raise Exception(f"Unexpected response shape from Ollama: {data}")
+            return content
+        except Exception as e:
+            print(f"❌ Error calling Ollama ({self.ollama_base_url}, model={ollama_model}): {e}")
+            raise
+
     def _validate_context(self, context: List[Dict]) -> bool:
         """Validate that context is in proper LLM message format"""
         if not isinstance(context, list):

@@ -1,4 +1,4 @@
-import React, { memo, useState } from 'react';
+import React, { memo, useState, useRef, useEffect, useCallback } from 'react';
 import MessageBubble from '../MessageBubble';
 
 interface Message {
@@ -56,6 +56,26 @@ const ChatView = memo(({
 }: ChatViewProps) => {
   const [isRenamingBranch, setIsRenamingBranch] = useState(false);
   const [newBranchName, setNewBranchName] = useState('');
+  const messagesRef = useRef<HTMLDivElement>(null);
+  const [showScrollButton, setShowScrollButton] = useState(false);
+
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
+    const el = messagesRef.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior });
+  }, []);
+
+  const handleScroll = useCallback(() => {
+    const el = messagesRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    setShowScrollButton(distanceFromBottom > 200);
+  }, []);
+
+  // Land on the latest message when the branch or message set changes (e.g. after a tree node click)
+  useEffect(() => {
+    scrollToBottom();
+    handleScroll();
+  }, [currentBranch, paginatedMessages.length, pendingUserMessage, showAITyping, scrollToBottom, handleScroll]);
 
   const startBranchRename = () => {
     setIsRenamingBranch(true);
@@ -119,7 +139,8 @@ const ChatView = memo(({
         </div>
       </div>
       
-      <div className="messages" onClick={handleContainerClick}>
+      <div className="messages-wrapper">
+      <div className="messages" ref={messagesRef} onScroll={handleScroll} onClick={handleContainerClick}>
         {/* Render all normal messages */}
         {paginatedMessages.map((message) => (
           <MessageBubble
@@ -172,6 +193,17 @@ const ChatView = memo(({
             <div className="content"><em>AI is typing...</em></div>
           </div>
         )}
+      </div>
+
+      {showScrollButton && (
+        <button
+          className="scroll-to-bottom-btn"
+          onClick={() => scrollToBottom('smooth')}
+          title="Scroll to latest message"
+        >
+          ↓
+        </button>
+      )}
       </div>
 
       {/* Show more / less button */}

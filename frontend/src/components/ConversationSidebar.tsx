@@ -1,4 +1,4 @@
-import React, { memo, useState } from 'react';
+import React, { memo, useState, useEffect } from 'react';
 
 interface Conversation {
   id: string;
@@ -29,6 +29,11 @@ const ConversationSidebar = memo(({
   const [renameTitle, setRenameTitle] = useState('');
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [conversationToDelete, setConversationToDelete] = useState<Conversation | null>(null);
+  const [collapsed, setCollapsed] = useState<boolean>(() => localStorage.getItem('chatbranch-sidebar-collapsed') === 'true');
+
+  useEffect(() => {
+    localStorage.setItem('chatbranch-sidebar-collapsed', String(collapsed));
+  }, [collapsed]);
 
   const handleCreateConversation = () => {
     if (newConversationTitle.trim()) {
@@ -78,25 +83,26 @@ const ConversationSidebar = memo(({
 
   return (
     <>
-      <div className="sidebar">
+      <div className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
         <div className="sidebar-header">
-          <h3>Conversations</h3>
-          <button onClick={() => setShowCreateDialog(true)} className="new-conversation-btn">
-            + New
+          {!collapsed && <h3>Conversations</h3>}
+          {!collapsed && (
+            <button onClick={() => setShowCreateDialog(true)} className="new-conversation-btn">
+              + New
+            </button>
+          )}
+          <button
+            onClick={() => setCollapsed(c => !c)}
+            className="sidebar-toggle-btn"
+            title={collapsed ? 'Expand conversations' : 'Collapse conversations'}
+          >
+            {collapsed ? '»' : '«'}
           </button>
         </div>
-        {conversations.map(conv => (
+        {!collapsed && conversations.map(conv => (
           <div 
             key={conv.id} 
             className={`conversation-item ${currentConversation?.id === conv.id ? 'active' : ''}`}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              padding: '8px 12px',
-              cursor: 'pointer',
-              borderRadius: '4px',
-              margin: '2px 0'
-            }}
           >
             {renamingId === conv.id ? (
               <div className="rename-input-container">
@@ -123,7 +129,7 @@ const ConversationSidebar = memo(({
                   style={{
                     flex: 1,
                     cursor: 'pointer',
-                    padding: '8px 0',
+                    padding: '2px 0',
                     overflow: 'hidden'
                   }}
                 >
@@ -133,8 +139,8 @@ const ConversationSidebar = memo(({
                 </div>
                 <div className="conversation-actions" style={{
                   display: 'flex',
-                  gap: '4px',
-                  marginLeft: '8px',
+                  gap: '2px',
+                  marginLeft: '4px',
                   flexShrink: 0
                 }}>
                   <button 
@@ -145,8 +151,8 @@ const ConversationSidebar = memo(({
                     className="rename-btn"
                     title="Rename conversation"
                     style={{
-                      padding: '4px 6px',
-                      fontSize: '12px',
+                      padding: '1px 3px',
+                      fontSize: '11px',
                       border: 'none',
                       background: 'transparent',
                       cursor: 'pointer',
@@ -163,8 +169,8 @@ const ConversationSidebar = memo(({
                     className="delete-btn"
                     title="Delete conversation"
                     style={{
-                      padding: '4px 6px',
-                      fontSize: '12px',
+                      padding: '1px 3px',
+                      fontSize: '11px',
                       border: 'none',
                       background: 'transparent',
                       cursor: 'pointer',
