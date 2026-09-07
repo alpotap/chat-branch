@@ -12,6 +12,9 @@ class ConversationResponse(BaseModel):
     title: str
     created_at: datetime
     updated_at: datetime
+    folder_id: Optional[str] = None
+    color: Optional[str] = None
+    position: int = 0
 
     class Config:
         from_attributes = True
@@ -20,6 +23,45 @@ class ConversationResponse(BaseModel):
     @classmethod
     def convert_id_to_string(cls, v: Union[str, uuid.UUID]) -> str:
         return str(v) if isinstance(v, uuid.UUID) else v
+
+# Folder schemas
+class FolderCreate(BaseModel):
+    name: str
+    color: Optional[str] = "#667eea"
+
+class FolderUpdate(BaseModel):
+    name: Optional[str] = None
+    color: Optional[str] = None
+    position: Optional[int] = None
+
+class FolderResponse(BaseModel):
+    id: str
+    name: str
+    color: str
+    position: int = 0
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+    @field_validator('id', mode='before')
+    @classmethod
+    def convert_id_to_string(cls, v: Union[str, uuid.UUID]) -> str:
+        return str(v) if isinstance(v, uuid.UUID) else v
+
+class ConversationOrganize(BaseModel):
+    folder_id: Optional[str] = None
+    color: Optional[str] = None
+    position: Optional[int] = None
+
+class SidebarOrderItem(BaseModel):
+    id: str
+    position: int
+    folder_id: Optional[str] = None
+
+class SidebarOrder(BaseModel):
+    folders: List[SidebarOrderItem] = []
+    conversations: List[SidebarOrderItem] = []
 
 # Message schemas
 class MessageCreate(BaseModel):
@@ -39,6 +81,7 @@ class MessageResponse(BaseModel):
     branch_name: str
     llm_model: Optional[str]
     created_at: datetime
+    is_summary: bool = False
 
     class Config:
         from_attributes = True
@@ -62,6 +105,7 @@ class BranchResponse(BaseModel):
     created_from_message_id: str
     created_at: datetime
     color: str
+    rating: int = 0
 
     class Config:
         from_attributes = True
@@ -79,6 +123,7 @@ class MessageNode(BaseModel):
     branch_name: str
     llm_model: Optional[str]
     created_at: datetime
+    is_summary: bool = False
     children: List['MessageNode'] = []
     
     @field_validator('id', mode='before')

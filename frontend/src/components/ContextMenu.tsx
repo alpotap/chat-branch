@@ -1,4 +1,5 @@
 import React from 'react';
+import StarRating from './StarRating';
 
 interface Message {
   id: string;
@@ -22,6 +23,12 @@ interface ContextMenuProps {
   onOpenRegenBranchDialog?: (messageId: string) => void;
   onRegenerate?: (messageId: string, type: 'branch' | 'place', branchName?: string, switchToChat?: boolean) => void;
   onRequestDelete?: (message: Message) => void;
+  onSummarize?: (messageId: string) => void;
+  onSummarizeBranch?: (branchName: string) => void;
+  onDuplicateBranch?: (branchName: string) => void;
+  onDuplicateFullContext?: (messageId: string) => void;
+  onRateBranch?: (branchName: string, rating: number) => void;
+  branchRating?: number;
   conversationTree?: any;
 }
 
@@ -36,6 +43,12 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
   onOpenRegenBranchDialog,
   onRegenerate,
   onRequestDelete,
+  onSummarize,
+  onSummarizeBranch,
+  onDuplicateBranch,
+  onDuplicateFullContext,
+  onRateBranch,
+  branchRating = 0,
   conversationTree,
 }) => {
   const canRegenerate = () => {
@@ -67,9 +80,14 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
         className="context-menu"
         style={{ left: contextMenuPos.x, top: contextMenuPos.y }}
       >
-        {message.role === 'user' && onBeginEdit && (
+        {onBeginEdit && (
           <button onClick={() => { onBeginEdit(message.id, message.content); onClose(); }}>
-            ✏️ Edit Message
+            ✏️ {message.role === 'assistant' ? 'Edit Response (context)' : 'Edit Message'}
+          </button>
+        )}
+        {onSummarize && (
+          <button onClick={() => { onSummarize(message.id); onClose(); }}>
+            🧠 Summarize Message
           </button>
         )}
         {message.role === 'user' && onRequestDelete && (
@@ -126,6 +144,37 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
               >
                 🚫 Cannot Regenerate
                 <span style={{ fontSize: '12px', color: '#666' }}>ⓘ</span>
+              </button>
+            )}
+          </>
+        )}
+        {(onSummarizeBranch || onDuplicateBranch || onRateBranch) && (
+          <>
+            <hr style={{ margin: '4px 0', border: 'none', borderTop: '1px solid #ddd' }} />
+            <div style={{ padding: '2px 8px', fontSize: '0.72rem', color: '#666' }}>
+              Branch: {message.branch_name}
+            </div>
+            {onRateBranch && (
+              <div style={{ padding: '2px 8px' }}>
+                <StarRating value={branchRating} onChange={(rating) => { onRateBranch(message.branch_name, rating); onClose(); }} />
+              </div>
+            )}
+            {onSummarizeBranch && (
+              <button onClick={() => { onSummarizeBranch(message.branch_name); onClose(); }}>
+                🧠 Summarize Branch
+              </button>
+            )}
+            {onDuplicateBranch && (
+              <button onClick={() => { onDuplicateBranch(message.branch_name); onClose(); }}>
+                📑 New Conversation from Branch
+              </button>
+            )}
+            {onDuplicateFullContext && (
+              <button
+                onClick={() => { onDuplicateFullContext(message.id); onClose(); }}
+                title="Copies this message and every parent message, across all parent branches"
+              >
+                🗂️ New Conversation from Full Context
               </button>
             )}
           </>

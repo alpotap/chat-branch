@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Text, DateTime, Boolean, ForeignKey
+from sqlalchemy import Column, String, Text, DateTime, Boolean, Integer, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 import uuid
@@ -28,11 +28,26 @@ class Conversation(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     user_id = Column(String(36), ForeignKey("users.id"), nullable=False)  # Updated from owner_id
+    folder_id = Column(String(36), ForeignKey("folders.id"), nullable=True)
+    color = Column(String(7), nullable=True)
+    position = Column(Integer, default=0)
     
     # Relationships
     user = relationship("User", back_populates="conversations")
     messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan")
     branches = relationship("Branch", back_populates="conversation", cascade="all, delete-orphan")
+
+class Folder(Base):
+    __tablename__ = "folders"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False)
+    name = Column(String(255), nullable=False)
+    color = Column(String(7), default="#667eea")
+    position = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User")
 
 class Message(Base):
     __tablename__ = "messages"
@@ -48,6 +63,7 @@ class Message(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     branch_name = Column(String(100), default="main")
     is_active = Column(Boolean, default=True)
+    is_summary = Column(Boolean, default=False)
     
     # Relationships
     user = relationship("User")
@@ -65,6 +81,7 @@ class Branch(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     color = Column(String(7), default="#3B82F6")  # hex color for UI
     is_active = Column(Boolean, default=True)
+    rating = Column(Integer, default=0)  # 0-5 stars
     
     # Relationships
     user = relationship("User")

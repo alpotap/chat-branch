@@ -1,5 +1,6 @@
 import React, { memo, useState, useRef, useEffect, useCallback } from 'react';
 import MessageBubble from '../MessageBubble';
+import StarRating from './StarRating';
 
 interface Message {
   id: string;
@@ -8,6 +9,7 @@ interface Message {
   branch_name: string;
   llm_model?: string;
   created_at: string;
+  is_summary?: boolean;
   children: Message[];
 }
 
@@ -31,6 +33,12 @@ interface ChatViewProps {
   pendingUserMessage?: { id: string; content: string; created_at: string; error?: string; retryCount?: number } | null;
   showAITyping?: boolean;
   onRetrySendMessage?: () => void;
+  branchRating?: number;
+  onRateBranch?: (branchName: string, rating: number) => void;
+  onSummarizeMessage?: (messageId: string) => void;
+  onSummarizeBranch?: (branchName: string) => void;
+  onDuplicateBranch?: (branchName: string) => void;
+  busy?: boolean;
 }
 
 const ChatView = memo(({
@@ -52,7 +60,13 @@ const ChatView = memo(({
   pendingUserMessage,
   showAITyping,
   onRetrySendMessage,
-  onBeginEdit
+  onBeginEdit,
+  branchRating = 0,
+  onRateBranch,
+  onSummarizeMessage,
+  onSummarizeBranch,
+  onDuplicateBranch,
+  busy = false
 }: ChatViewProps) => {
   const [isRenamingBranch, setIsRenamingBranch] = useState(false);
   const [newBranchName, setNewBranchName] = useState('');
@@ -134,7 +148,32 @@ const ChatView = memo(({
               >
                 ✏️
               </button>
+              {onRateBranch && (
+                <StarRating value={branchRating} onChange={(rating) => onRateBranch(currentBranch, rating)} />
+              )}
             </div>
+          )}
+        </div>
+        <div className="branch-info-actions">
+          {onSummarizeBranch && (
+            <button
+              className="msg-action-btn"
+              onClick={() => onSummarizeBranch(currentBranch)}
+              disabled={busy}
+              title="Summarize this branch and append the summary"
+            >
+              🧠 Summarize branch
+            </button>
+          )}
+          {onDuplicateBranch && (
+            <button
+              className="msg-action-btn"
+              onClick={() => onDuplicateBranch(currentBranch)}
+              disabled={busy}
+              title="Copy this branch and its inherited context into a new conversation"
+            >
+              📑 New conversation from branch
+            </button>
           )}
         </div>
       </div>
@@ -152,6 +191,7 @@ const ChatView = memo(({
             onRegenerate={onRegenerate}
             onBeginEdit={onBeginEdit}
                       onRequestDelete={onRequestDelete}
+            onSummarize={onSummarizeMessage}
             isSelected={selectedMessage === message.id}
             depth={0}
             conversationTree={conversationTree}

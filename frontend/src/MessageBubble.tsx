@@ -12,6 +12,7 @@ interface Message {
   branch_name: string;
   llm_model?: string;
   created_at: string;
+  is_summary?: boolean;
   children: Message[];
 }
 
@@ -23,6 +24,7 @@ interface MessageBubbleProps {
   onRegenerate: (messageId: string, type: 'branch' | 'place', branchName?: string, switchToChat?: boolean) => void;
   onBeginEdit: (messageId: string, originalContent: string) => void;
   onRequestDelete?: (message: Message) => void;
+  onSummarize?: (messageId: string) => void;
   isSelected: boolean;
   depth: number;
   conversationTree?: any;
@@ -38,6 +40,7 @@ const MessageBubble = memo<MessageBubbleProps>(({
   onRegenerate,
   onBeginEdit,
   onRequestDelete,
+  onSummarize,
   isSelected,
   depth,
   conversationTree,
@@ -181,7 +184,7 @@ const MessageBubble = memo<MessageBubbleProps>(({
   return (
     <>
       <div 
-        className={`message-bubble ${message.role} ${isSelected ? 'selected' : ''}`}
+        className={`message-bubble ${message.role} ${isSelected ? 'selected' : ''} ${message.is_summary ? 'summary' : ''}`}
         style={{ 
           marginLeft: `${depth * 20}px`,
           borderLeft: `4px solid ${getBranchColor(message.branch_name)}`
@@ -210,7 +213,7 @@ const MessageBubble = memo<MessageBubbleProps>(({
               🗑️
             </button>
           )}
-          {message.llm_model && <span className="model">{message.llm_model}</span>}
+          {message.role === 'assistant' && message.llm_model && <span className="model">{message.llm_model}</span>}
           <span className="time">
             {new Date(message.created_at).toLocaleTimeString()}
           </span>
@@ -244,6 +247,46 @@ const MessageBubble = memo<MessageBubbleProps>(({
           )}
         </div>
         <div className="message-actions">
+          {message.role === 'assistant' && (
+            <>
+              <button className="msg-action-btn" onClick={(e) => { e.stopPropagation(); handleBranchClick(); }} title="Create a branch from this response">
+                🌿 Branch
+              </button>
+              <button
+                className="msg-action-btn"
+                onClick={(e) => { e.stopPropagation(); handleRegenInBranchClick(); }}
+                disabled={!canRegenerate()}
+                title={canRegenerate() ? 'Re-generate in a new branch' : 'Cannot regenerate: this message has follow-ups or branches'}
+              >
+                🔄 Regen
+              </button>
+              <button
+                className="msg-action-btn"
+                onClick={(e) => { e.stopPropagation(); handleRegenInPlaceClick(); }}
+                disabled={!canRegenerate()}
+                title={canRegenerate() ? 'Replace this response in place' : 'Cannot regenerate: this message has follow-ups or branches'}
+              >
+                ⚠️ Regen here
+              </button>
+            </>
+          )}
+          <button
+            className="msg-action-btn"
+            onClick={(e) => { e.stopPropagation(); onBeginEdit(message.id, message.content); }}
+            title={message.role === 'assistant' ? 'Edit this response - the edited text becomes the context for later messages' : 'Edit message'}
+          >
+            ✏️ Edit
+          </button>
+          {onSummarize && (
+            <button className="msg-action-btn" onClick={(e) => { e.stopPropagation(); onSummarize(message.id); }} title="Summarize this message">
+              🧠 Summarize
+            </button>
+          )}
+          {onRequestDelete && message.role === 'user' && (
+            <button className="msg-action-btn" onClick={(e) => { e.stopPropagation(); onRequestDelete(message); }} title="Delete message" style={{ color: '#b22222' }}>
+              🗑️ Delete
+            </button>
+          )}
           <button className="copy-btn" onClick={handleCopy} title="Copy message to clipboard">
             {copied ? '✓ Copied' : '⧉ Copy'}
           </button>
@@ -259,6 +302,8 @@ const MessageBubble = memo<MessageBubbleProps>(({
           onSelectMessage={onSelectMessage}
           onBranch={onBranch}
           onRegenerate={onRegenerate}
+          onRequestDelete={onRequestDelete ? ((m: any) => onRequestDelete({ ...m, children: m.children || [] })) : undefined}
+          onSummarize={onSummarize}
           onOpenBranchDialog={handleBranchClick}
           onOpenRegenBranchDialog={handleRegenInBranchClick}
           conversationTree={conversationTree}

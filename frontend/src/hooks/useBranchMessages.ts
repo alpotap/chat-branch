@@ -7,6 +7,7 @@ interface Message {
   branch_name: string;
   llm_model?: string;
   created_at: string;
+  is_summary?: boolean;
   children: Message[];
 }
 

@@ -1,7 +1,23 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden; /* the default body margin made the app 100vh + 16px tall */
+}
+
 .App {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: 100%;
+  overflow: hidden;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
 }
 
@@ -178,9 +194,90 @@
   background-color: #f8f9fa;
   border-right: 1px solid #ddd;
   padding: 0.4rem;
-  overflow-y: auto;
+  overflow: hidden;
   flex-shrink: 0;
-  transition: width 0.15s ease, padding 0.15s ease;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.sidebar-body {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.sidebar-body.drop-target {
+  outline: 1px dashed #667eea;
+  outline-offset: -2px;
+}
+
+.sidebar-resizer {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 5;
+}
+
+.sidebar-resizer:hover {
+  background: rgba(102, 126, 234, 0.35);
+}
+
+.folder-item {
+  margin-bottom: 0.25rem;
+}
+
+.folder-item.drop-target > .folder-header {
+  background: rgba(102, 126, 234, 0.15);
+}
+
+.folder-header {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.2rem 0.3rem;
+  background: #eef0f3;
+  border-radius: 4px;
+  font-size: 0.82rem;
+  cursor: grab;
+}
+
+.folder-toggle {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.7rem;
+  padding: 0 0.15rem;
+  color: #555;
+}
+
+.folder-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-children {
+  padding-left: 0.6rem;
+  border-left: 1px dashed #d5d8dc;
+  margin-left: 0.35rem;
+}
+
+.item-color-picker {
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+
+.conversation-item.drop-target {
+  outline: 1px dashed #667eea;
 }
 
 .sidebar.collapsed {
@@ -276,12 +373,23 @@
   border: none;
   cursor: pointer;
   padding: 0.2rem;
-  opacity: 0;
+  opacity: 0.55;
   transition: opacity 0.2s ease;
   font-size: 0.8rem;
 }
 
-.conversation-item:hover .rename-btn {
+.conversation-item:hover .rename-btn,
+.folder-header:hover .rename-btn {
+  opacity: 1;
+}
+
+.delete-btn {
+  color: #dc3545;
+  opacity: 0.55;
+}
+
+.conversation-item:hover .delete-btn,
+.folder-header:hover .delete-btn {
   opacity: 1;
 }
 
@@ -1065,10 +1173,10 @@
 .conversation-actions button {
   background: none;
   border: none;
-  padding: 0.25rem;
+  padding: 0.1rem 0.2rem;
+  font-size: 11px;
   cursor: pointer;
-  border-radius: 4px;
-  transition: all 0.2s ease;
+  border-radius: 3px;
 }
 
 .conversation-actions .rename-btn:hover {
@@ -1140,6 +1248,25 @@
   line-height: 1.5;
   margin-bottom: 1rem;
   resize: vertical;
+}
+
+.modal.edit-modal {
+  width: calc(100vw - 32px);
+  max-width: none;
+  height: calc(100vh - 32px);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+}
+
+.edit-modal .edit-textarea {
+  flex: 1;
+  min-height: 0;
+  resize: none;
+}
+
+.edit-modal .modal-buttons-vertical {
+  flex-shrink: 0;
 }
 
 .modal-buttons-vertical {
@@ -1343,6 +1470,118 @@
 
 .scroll-to-bottom-btn:hover {
   background: #f1f3f5;
+}
+
+/* Summary messages */
+.message-bubble.summary,
+.message-bubble.assistant.summary {
+  background-color: #fffbe6;
+  border: 1px solid #f2e3a3;
+}
+
+.message-bubble.assistant.summary .content {
+  color: #4a3f12;
+}
+
+.tree-node.summary {
+  background: #fffbe6;
+  border-color: #f2e3a3;
+}
+
+/* Star rating */
+.star-rating {
+  display: inline-flex;
+  gap: 1px;
+  line-height: 1;
+  cursor: pointer;
+  color: #d4a72c;
+}
+
+.star-rating.read-only {
+  cursor: default;
+}
+
+.star-rating .star {
+  user-select: none;
+}
+
+.tree-node-rating {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 0.2rem;
+}
+
+.tree-node-branch-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-align: center;
+  margin-bottom: 0.15rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-node.branch-node {
+  background: #ffffff;
+  color: #333;
+}
+
+.tree-expand-btn {
+  display: block;
+  width: 100%;
+  margin: 0.15rem 0 0.25rem;
+  padding: 0.05rem 0.3rem;
+  font-size: 0.68rem;
+  border: 1px dashed #c7ccd4;
+  border-radius: 4px;
+  background: #f3f4f6;
+  color: #444;
+  cursor: pointer;
+}
+
+.tree-expand-btn:hover {
+  background: #e6e8ec;
+}
+
+/* Message action bar (mirrors the right-click menu) */
+.message-actions {
+  flex-wrap: wrap;
+}
+
+.msg-action-btn {
+  background: rgba(0,0,0,0.06);
+  border: 1px solid rgba(0,0,0,0.1);
+  color: inherit;
+  border-radius: 4px;
+  padding: 0.05rem 0.4rem;
+  font-size: 0.7rem;
+  cursor: pointer;
+  line-height: 1.5;
+}
+
+.msg-action-btn:hover:not(:disabled) {
+  background: rgba(0,0,0,0.12);
+}
+
+.msg-action-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.message-bubble.user .msg-action-btn {
+  background: rgba(255,255,255,0.2);
+  border-color: rgba(255,255,255,0.35);
+}
+
+.message-bubble.user .msg-action-btn:hover:not(:disabled) {
+  background: rgba(255,255,255,0.32);
+}
+
+/* Branch info toolbar */
+.branch-info-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
 }
 
 .modal-buttons-vertical button .button-subtitle {

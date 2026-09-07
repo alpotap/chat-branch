@@ -16,6 +16,7 @@ import 'reactflow/dist/style.css';
 import { getBranchColorFromTree, BRANCH_COLORS, getRandomBranchColor } from './utils/branchColors';
 import { generateUniqueBranchName } from './utils/branchNaming';
 import ContextMenu from './components/ContextMenu';
+import StarRating from './components/StarRating';
 
 interface Message {
   id: string;
@@ -24,6 +25,7 @@ interface Message {
   branch_name: string;
   llm_model?: string;
   created_at: string;
+  is_summary?: boolean;
   children?: Message[] | string[];
 }
 
@@ -37,11 +39,34 @@ interface TreeViewProps {
   onBeginEdit?: (messageId: string, originalContent: string, originView?: 'chat' | 'tree') => void;
   onDeselectMessage?: () => void;
   onRequestDelete?: (message: Message) => void;
+  onSummarizeMessage?: (messageId: string) => void;
+  onSummarizeBranch?: (branchName: string) => void;
+  onDuplicateBranch?: (branchName: string) => void;
+  onDuplicateFullContext?: (messageId: string) => void;
+  onRateBranch?: (branchName: string, rating: number) => void;
   selectedMessage?: string;
   conversationTree?: any;
   pendingUserMessage?: { id: string; content: string; created_at: string; error?: string; retryCount?: number } | null;
   onRetrySendMessage?: () => void;
 }
+
+const PortalModal: React.FC<{ onClose: () => void; children: React.ReactNode }> = ({ onClose, children }) => {
+  if (typeof document === 'undefined') return null;
+  return ReactDOM.createPortal(
+    <div className="modal-overlay" onMouseDown={onClose}>
+      <div
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        onMouseDown={(event) => event.stopPropagation()}
+        onClick={(event) => event.stopPropagation()}
+      >
+        {children}
+      </div>
+    </div>,
+    document.body
+  );
+};
 
 const TreeView: React.FC<TreeViewProps> = ({
   messages,
@@ -57,6 +82,11 @@ const TreeView: React.FC<TreeViewProps> = ({
   pendingUserMessage,
   onRetrySendMessage
   ,onRequestDelete
+  ,onSummarizeMessage
+  ,onSummarizeBranch
+  ,onDuplicateBranch
+  ,onDuplicateFullContext
+  ,onRateBranch
 }) => {
   const TRUNCATE_LENGTH = 140;
   const normalizeContent = (s?: string) => (s || '').replace(/\s+/g, ' ').trim();
@@ -74,12 +104,19 @@ const TreeView: React.FC<TreeViewProps> = ({
   const [branchColor, setBranchColor] = useState('#3B82F6');
   const [branchDialogSource, setBranchDialogSource] = useState<Message | null>(null);
   const [regenDialogSource, setRegenDialogSource] = useState<Message | null>(null);
+  const [expandedBranches, setExpandedBranches] = useState<string[]>([]);
   const lastActionTimeRef = React.useRef<number | null>(null);
 
   const handleRightClick = useCallback((e: React.MouseEvent, message: Message) => {
     e.preventDefault();
     e.stopPropagation();
-    setContextMenuPos({ x: e.clientX, y: e.clientY });
+    const menuWidth = 280;
+    const menuHeight = 420;
+    const viewportPadding = 8;
+    setContextMenuPos({
+      x: Math.max(viewportPadding, Math.min(e.clientX, window.innerWidth - menuWidth - viewportPadding)),
+      y: Math.max(viewportPadding, Math.min(e.clientY, window.innerHeight - menuHeight - viewportPadding)),
+    });
     setContextMenuMessage(message);
   }, []);
 
@@ -122,133 +159,267 @@ const TreeView: React.FC<TreeViewProps> = ({
     }
   };
 
-  // Robust, type-safe node/edge creation
+  const getBranchRating = useCallback((branchName: string): number => {
+    const branch = conversationTree?.branches?.find((b: any) => b.name === branchName);
+    return branch?.rating || 0;
+  }, [conversationTree]);
+
+  // Branch structure: ordered messages per branch and the parent branch each one grew out of
+  const branchModel = useMemo(() => {
+    const messagesByBranch: { [branch: string]: Message[] } = {};
+    Object.values(messages).forEach(message => {
+      (messagesByBranch[message.branch_name] ||= []).push(message);
+    });
+    Object.values(messagesByBranch).forEach(list =>
+      list.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+    );
+
+    const parentMap: { [childId: string]: string } = {};
+    Object.values(messages).forEach(message => {
+      ((message.children || []) as any[]).forEach(child => {
+        const childId = typeof child === 'string' ? child : child.id;
+        parentMap[childId] = message.id;
+      });
+    });
+
+    const branchPoint: { [branch: string]: string | null } = {};
+    const parentBranch: { [branch: string]: string | null } = {};
+    Object.keys(messagesByBranch).forEach(branch => {
+      const meta = conversationTree?.branches?.find((b: any) => b.name === branch);
+      let pointId: string | null = meta?.created_from_message_id || null;
+      if (!pointId) {
+        const first = messagesByBranch[branch][0];
+        pointId = first ? parentMap[first.id] || null : null;
+      }
+      branchPoint[branch] = pointId;
+      const point = pointId ? messages[pointId] : undefined;
+      parentBranch[branch] = point && point.branch_name !== branch ? point.branch_name : null;
+    });
+
+    const children: { [branch: string]: string[] } = {};
+    const roots: string[] = [];
+    Object.keys(messagesByBranch).forEach(branch => {
+      const parent = parentBranch[branch];
+      if (parent && messagesByBranch[parent]) (children[parent] ||= []).push(branch);
+      else roots.push(branch);
+    });
+    Object.values(children).forEach(list => list.sort());
+    roots.sort((a, b) => (a === 'main' ? -1 : b === 'main' ? 1 : a.localeCompare(b)));
+
+    return { messagesByBranch, children, roots, branchPoint, parentBranch };
+  }, [messages, conversationTree]);
+
+  const isExpanded = useCallback((branch: string) => expandedBranches.includes(branch), [expandedBranches]);
+
+  const toggleBranch = useCallback((branch: string) => {
+    setExpandedBranches(prev => prev.includes(branch) ? prev.filter(b => b !== branch) : [...prev, branch]);
+  }, []);
+
+  // Robust, type-safe node/edge creation - one node per branch unless the branch is expanded
   const { flowNodes, flowEdges } = useMemo(() => {
-  // PERF logging removed to avoid console.errors when time markers mismatch
     const nodes: Node[] = [];
     const edges: Edge[] = [];
-    const positions: Record<string, { x: number; y: number }> = {};
-    const spacingX = 300;
-    const spacingYBase = 160;
-    const spacingAssistantToUser = 220; // larger gap between AI response and next human message
-    const spacingUserToAssistant = 120; // smaller gap between human message and AI response
+    const spacingX = 320;
+    const rowY = 170;
+    const branchGapY = 120;
+    const { messagesByBranch, children, roots, branchPoint } = branchModel;
 
-    function computeSpacing(parentId: string, childId: string) {
-      const parentRole = messages[parentId]?.role || '';
-      const childRole = messages[childId]?.role || '';
-      if (parentRole === 'assistant' && childRole === 'user') return spacingAssistantToUser;
-      if (parentRole === 'user' && childRole === 'assistant') return spacingUserToAssistant;
-      return spacingYBase;
-    }
-    // Helper to recursively layout the tree
-    function layoutTree(messageId: string, x: number, y: number, visited: Set<string>) {
-      if (visited.has(messageId)) return x;
-      visited.add(messageId);
-      positions[messageId] = { x, y };
-      const message = messages[messageId];
-      if (!message) return x;
-      const childrenRaw = message.children || [];
-      const childIds: string[] = (childrenRaw as any[]).map(child => typeof child === 'string' ? child : child.id);
-      let currentX = x;
-      childIds.forEach((childId, idx) => {
-        const deltaY = computeSpacing(messageId, childId);
-        currentX = layoutTree(childId, currentX, y + deltaY, visited);
-        if (idx < childIds.length - 1) currentX += spacingX;
-      });
-      if (childIds.length > 1) {
-        const firstX = positions[childIds[0]]?.x ?? x;
-        const lastX = positions[childIds[childIds.length - 1]]?.x ?? x;
-        positions[messageId].x = (firstX + lastX) / 2;
+    const nodeIdForBranch = (branch: string) => `branch:${branch}`;
+    const lastMessage = (branch: string) => {
+      const list = messagesByBranch[branch] || [];
+      return list[list.length - 1];
+    };
+    // Where an edge into a branch should attach when the parent branch is expanded
+    const sourceNodeFor = (branch: string) => {
+      const pointId = branchPoint[branch];
+      const point = pointId ? messages[pointId] : undefined;
+      if (!point) return null;
+      return isExpanded(point.branch_name) ? point.id : nodeIdForBranch(point.branch_name);
+    };
+    const targetNodeFor = (branch: string) => {
+      const list = messagesByBranch[branch] || [];
+      return isExpanded(branch) && list.length ? list[0].id : nodeIdForBranch(branch);
+    };
+
+    const subtreeWidth = (branch: string): number => {
+      const kids = children[branch] || [];
+      if (!kids.length) return 1;
+      return kids.reduce((sum, kid) => sum + subtreeWidth(kid), 0);
+    };
+
+    const positions: { [nodeId: string]: { x: number; y: number } } = {};
+    const layoutBranch = (branch: string, colStart: number, y: number) => {
+      const list = messagesByBranch[branch] || [];
+      const width = subtreeWidth(branch);
+      const centerCol = colStart + width / 2 - 0.5;
+      const x = centerCol * spacingX;
+
+      if (isExpanded(branch) && list.length) {
+        list.forEach((message, index) => { positions[message.id] = { x, y: y + index * rowY }; });
+      } else {
+        positions[nodeIdForBranch(branch)] = { x, y };
       }
-      return positions[messageId].x;
-    }
-    // Layout all root messages
-    let rootX = 0;
-    rootMessages.forEach((rootId, idx) => {
-      rootX = layoutTree(rootId, rootX, 0, new Set());
-      if (idx < rootMessages.length - 1) rootX += spacingX;
+
+      const usedRows = isExpanded(branch) ? Math.max(1, list.length) : 1;
+      const nextY = y + usedRows * rowY + branchGapY;
+      let col = colStart;
+      (children[branch] || []).forEach(kid => {
+        layoutBranch(kid, col, nextY);
+        col += subtreeWidth(kid);
+      });
+    };
+
+    let rootCol = 0;
+    roots.forEach(branch => {
+      layoutBranch(branch, rootCol, 0);
+      rootCol += subtreeWidth(branch);
     });
-    // Build nodes
-    Object.values(messages).forEach(message => {
-      const pos = positions[message.id] || { x: 0, y: 0 };
-      const isSelected = selectedMessage === message.id;
-      const isInPath = pathToRoot.has(message.id);
-      const isRoot = rootMessages.includes(message.id);
-      let nodeClasses = `tree-node ${message.role}`;
-      if (isSelected) nodeClasses += ' selected';
-      else if (isInPath) {
-        nodeClasses += ' in-path';
-        if (isRoot) nodeClasses += ' root-in-path';
-      }
-      nodes.push({
-        id: message.id,
-        type: 'default',
-        position: pos,
-        data: {
-          label: (
-            <div
-              className={nodeClasses}
-              onClick={() => onMessageSelect(message.id)}
-              onDoubleClick={() => onSwitchToChatView(message.branch_name, message.id)}
-              onContextMenu={e => handleRightClick(e, message)}
-              title={message.role === 'assistant' ? "Click to select. Double-click to switch to chat view. Right-click to create branch." : "Click to select. Double-click to switch to chat view."}
-            >
-              <div className="tree-node-header"></div>
-              <div className="tree-node-content" title={normalizeContent(message.content)}>{truncate(message.content)}</div>
-              {message.llm_model && <div className="tree-node-model">{message.llm_model}</div>}
-            </div>
-          ),
-        },
-        style: { background: 'transparent', border: 'none', padding: 0 },
-      });
-      // Edges
-      const childrenRaw = message.children || [];
-      const childIds: string[] = (childrenRaw as any[]).map(child => typeof child === 'string' ? child : child.id);
-      childIds.forEach(childId => {
-        const childBranch = messages[childId]?.branch_name ?? 'main';
-        const isDirect = selectedMessage === childId || selectedMessage === message.id;
-        const isPath = pathToRoot.has(message.id) && pathToRoot.has(childId);
-        let edgeStyle: any = { stroke: getBranchColorFromTree(childBranch, conversationTree), strokeWidth: 2 };
-        let animated = false;
-        if (isDirect) { edgeStyle.strokeWidth = 4; edgeStyle.stroke = '#667eea'; animated = true; }
-        else if (isPath) { /* Optionally highlight path */ }
-        edges.push({
-          id: `${message.id}-${childId}`,
-          source: message.id,
-          target: childId,
-          type: 'smoothstep',
-          style: edgeStyle,
-          animated,
+
+    const branchColorOf = (branch: string) => getBranchColorFromTree(branch, conversationTree);
+
+    Object.keys(messagesByBranch).forEach(branch => {
+      const list = messagesByBranch[branch];
+      const expanded = isExpanded(branch);
+      const color = branchColorOf(branch);
+
+      if (!expanded) {
+        const last = lastMessage(branch);
+        const nodeId = nodeIdForBranch(branch);
+        const isSelected = !!selectedMessage && list.some(m => m.id === selectedMessage);
+        const collapsedCount = Math.max(0, list.length - 1);
+        nodes.push({
+          id: nodeId,
+          type: 'default',
+          position: positions[nodeId] || { x: 0, y: 0 },
+          data: {
+            label: (
+              <div
+                className={`tree-node branch-node ${last?.role || 'assistant'} ${isSelected ? 'selected' : ''} ${last?.is_summary ? 'summary' : ''}`}
+                style={{ borderTop: `4px solid ${color}` }}
+                onClick={() => last && onMessageSelect(last.id)}
+                onDoubleClick={() => last && onSwitchToChatView(branch, last.id)}
+                onContextMenu={e => last && handleRightClick(e, last)}
+                title="Click to select the latest message. Double-click to open this branch in chat. Right-click for actions."
+              >
+                <div className="tree-node-branch-title" style={{ color }}>
+                  🌿 {branch}
+                </div>
+                <div className="tree-node-rating" onClick={e => e.stopPropagation()}>
+                  <StarRating
+                    value={getBranchRating(branch)}
+                    onChange={onRateBranch ? (rating) => onRateBranch(branch, rating) : undefined}
+                    title={`Branch '${branch}' rating`}
+                  />
+                </div>
+                <button
+                  className="tree-expand-btn"
+                  onClick={e => { e.stopPropagation(); toggleBranch(branch); }}
+                  title={`Expand ${list.length} message(s) in this branch`}
+                >
+                  ＋ {collapsedCount > 0 ? `${collapsedCount} hidden` : 'expand'}
+                </button>
+                <div className="tree-node-content" title={normalizeContent(last?.content)}>
+                  {truncate(last?.content)}
+                </div>
+                {last?.role === 'assistant' && last.llm_model && <div className="tree-node-model">{last.llm_model}</div>}
+              </div>
+            ),
+          },
+          style: { background: 'transparent', border: 'none', padding: 0 },
         });
+      } else {
+        list.forEach((message, index) => {
+          const isSelected = selectedMessage === message.id;
+          const isInPath = pathToRoot.has(message.id);
+          let nodeClasses = `tree-node ${message.role}`;
+          if (message.is_summary) nodeClasses += ' summary';
+          if (isSelected) nodeClasses += ' selected';
+          else if (isInPath) nodeClasses += ' in-path';
+
+          nodes.push({
+            id: message.id,
+            type: 'default',
+            position: positions[message.id] || { x: 0, y: 0 },
+            data: {
+              label: (
+                <div
+                  className={nodeClasses}
+                  style={index === 0 ? { borderTop: `4px solid ${color}` } : undefined}
+                  onClick={() => onMessageSelect(message.id)}
+                  onDoubleClick={() => onSwitchToChatView(message.branch_name, message.id)}
+                  onContextMenu={e => handleRightClick(e, message)}
+                  title="Click to select. Double-click to switch to chat view. Right-click for actions."
+                >
+                  {index === 0 && (
+                    <>
+                      <div className="tree-node-branch-title" style={{ color }}>🌿 {branch}</div>
+                      <div className="tree-node-rating" onClick={e => e.stopPropagation()}>
+                        <StarRating
+                          value={getBranchRating(branch)}
+                          onChange={onRateBranch ? (rating) => onRateBranch(branch, rating) : undefined}
+                          title={`Branch '${branch}' rating`}
+                        />
+                      </div>
+                      <button
+                        className="tree-expand-btn"
+                        onClick={e => { e.stopPropagation(); toggleBranch(branch); }}
+                        title="Collapse this branch"
+                      >
+                        － collapse
+                      </button>
+                    </>
+                  )}
+                  <div className="tree-node-content" title={normalizeContent(message.content)}>{truncate(message.content)}</div>
+                  {message.role === 'assistant' && message.llm_model && <div className="tree-node-model">{message.llm_model}</div>}
+                </div>
+              ),
+            },
+            style: { background: 'transparent', border: 'none', padding: 0 },
+          });
+
+          if (index > 0) {
+            edges.push({
+              id: `${list[index - 1].id}-${message.id}`,
+              source: list[index - 1].id,
+              target: message.id,
+              type: 'smoothstep',
+              style: { stroke: color, strokeWidth: 2 },
+            });
+          }
+        });
+      }
+    });
+
+    // Branch-to-branch edges are always drawn, so the branch structure is never hidden
+    Object.keys(messagesByBranch).forEach(branch => {
+      const source = sourceNodeFor(branch);
+      const target = targetNodeFor(branch);
+      if (!source || source === target) return;
+      edges.push({
+        id: `branchlink-${source}-${target}`,
+        source,
+        target,
+        type: 'smoothstep',
+        style: { stroke: branchColorOf(branch), strokeWidth: 3 },
+        animated: false,
       });
     });
+
     // Pending user message node (only if not already in messages and not duplicated by content)
     if (pendingUserMessage) {
       const branchName = conversationTree?.currentBranch || 'main';
-      // Check for duplicate user message in same branch with same content
-      const duplicate = Object.values(messages).some(msg =>
+      const branchList = branchModel.messagesByBranch[branchName] || [];
+      const duplicate = branchList.some(msg =>
         msg.role === 'user' &&
-        msg.branch_name === branchName &&
         msg.content.trim() === pendingUserMessage.content.trim() &&
         new Date(msg.created_at).getTime() >= new Date(pendingUserMessage.created_at).getTime()
       );
       if (!duplicate) {
-        let lastMsgId: string | null = null;
-        let lastMsgDate = 0;
-        Object.values(messages).forEach(msg => {
-          if (msg.branch_name === branchName) {
-            const msgDate = new Date(msg.created_at).getTime();
-            if (!lastMsgId || msgDate > lastMsgDate) {
-              lastMsgId = msg.id;
-              lastMsgDate = msgDate;
-            }
-          }
-        });
-        const pendingDeltaY = lastMsgId ? computeSpacing(lastMsgId, pendingUserMessage.id) : spacingYBase;
-        const pendingPos = lastMsgId ? {
-          x: (positions[lastMsgId]?.x || 0),
-          y: (positions[lastMsgId]?.y || 0) + pendingDeltaY,
-        } : { x: 0, y: 0 };
+        const anchorId = isExpanded(branchName) && branchList.length
+          ? branchList[branchList.length - 1].id
+          : nodeIdForBranch(branchName);
+        const anchorPos = positions[anchorId];
+        const pendingPos = anchorPos ? { x: anchorPos.x, y: anchorPos.y + rowY } : { x: 0, y: 0 };
         nodes.push({
           id: pendingUserMessage.id,
           type: 'default',
@@ -278,10 +449,10 @@ const TreeView: React.FC<TreeViewProps> = ({
           },
           style: { background: 'transparent', border: 'none', padding: 0 },
         });
-        if (lastMsgId) {
+        if (anchorPos) {
           edges.push({
-            id: `${lastMsgId}-${pendingUserMessage.id}`,
-            source: lastMsgId,
+            id: `${anchorId}-${pendingUserMessage.id}`,
+            source: anchorId,
             target: pendingUserMessage.id,
             type: 'smoothstep',
             style: { stroke: '#a0aec0', strokeWidth: 2, strokeDasharray: '4 2' },
@@ -291,7 +462,7 @@ const TreeView: React.FC<TreeViewProps> = ({
       }
     }
     return { flowNodes: nodes, flowEdges: edges };
-  }, [messages, rootMessages, selectedMessage, onMessageSelect, onSwitchToChatView, pathToRoot, pendingUserMessage, onRetrySendMessage, conversationTree]);
+  }, [messages, branchModel, isExpanded, toggleBranch, selectedMessage, onMessageSelect, onSwitchToChatView, handleRightClick, pathToRoot, pendingUserMessage, onRetrySendMessage, conversationTree, getBranchRating, onRateBranch, normalizeContent, truncate]);
 
   // ReactFlow state
   const [, , onNodesChange] = useNodesState([]);
@@ -366,21 +537,6 @@ const TreeView: React.FC<TreeViewProps> = ({
     }
   }, [showRegenBranchDialog]);
 
-  // Lightweight portal modal to decouple from ReactFlow rendering
-  const PortalModal: React.FC<{ onClose: () => void; children: React.ReactNode }> = ({ onClose, children }) => {
-    if (typeof document === 'undefined') return null;
-    return ReactDOM.createPortal(
-      (
-        <div className="modal-overlay" onClick={onClose}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            {children}
-          </div>
-        </div>
-      ),
-      document.body
-    );
-  };
-
   // Regeneration dialog handlers
   const handleRegenInPlace = useCallback(() => {
     if (contextMenuMessage && onRegenerate) {
@@ -432,6 +588,12 @@ const TreeView: React.FC<TreeViewProps> = ({
           onOpenRegenBranchDialog={handleOpenRegenBranchDialog}
           onRegenerate={onRegenerate}
           onRequestDelete={onRequestDelete}
+          onSummarize={onSummarizeMessage}
+          onSummarizeBranch={onSummarizeBranch}
+          onDuplicateBranch={onDuplicateBranch}
+          onDuplicateFullContext={onDuplicateFullContext}
+          onRateBranch={onRateBranch}
+          branchRating={getBranchRating(contextMenuMessage.branch_name)}
           conversationTree={conversationTree}
         />
       )}

@@ -13,13 +13,33 @@ backend_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_dir))
 
 from app.database import engine, Base
-from app.models import Conversation, Message, Branch
+from app.models import Conversation, Message, Branch, Folder
+from sqlalchemy import text
+
+# Columns added after the initial schema; create_all() does not alter existing tables.
+SCHEMA_UPGRADES = [
+    "ALTER TABLE messages ADD COLUMN IF NOT EXISTS is_summary BOOLEAN DEFAULT false;",
+    "ALTER TABLE branches ADD COLUMN IF NOT EXISTS rating INTEGER DEFAULT 0;",
+    "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS folder_id VARCHAR(36);",
+    "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS color VARCHAR(7);",
+    "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS position INTEGER DEFAULT 0;",
+]
+
+def apply_schema_upgrades():
+    """Add columns introduced after the initial schema (idempotent)"""
+    with engine.begin() as conn:
+        for stmt in SCHEMA_UPGRADES:
+            try:
+                conn.execute(text(stmt))
+            except Exception as e:
+                print(f"⚠️  Schema upgrade skipped ({stmt}): {e}")
 
 def init_tables():
     """Create all database tables"""
     try:
         print("🗄️  Creating database tables...")
         Base.metadata.create_all(bind=engine)
+        apply_schema_upgrades()
         print("✅ Database tables created successfully!")
         print("\nTables created:")
         print("  - conversations")

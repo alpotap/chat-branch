@@ -18,6 +18,7 @@ import './App.css';
 
 const API_BASE = process.env.REACT_APP_API_BASE || '/api';
 const DEFAULT_MODEL = 'openai/gpt-3.5-turbo';
+const MODEL_STORAGE_KEY = 'chatbranch-selected-model';
 
 // Simple undo/redo state for within-conversation navigation
 interface ViewState {
@@ -38,7 +39,11 @@ const ConversationApp: React.FC = () => {
   const { conversationId } = useParams<{ conversationId: string }>();
   const navigate = useNavigate();
   const [currentBranch, setCurrentBranch] = useState<string>('main');
-  const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL);
+  const [selectedModel, setSelectedModel] = useState(() => localStorage.getItem(MODEL_STORAGE_KEY) || DEFAULT_MODEL);
+
+  useEffect(() => {
+    localStorage.setItem(MODEL_STORAGE_KEY, selectedModel);
+  }, [selectedModel]);
   
   // Get initial view mode from localStorage or default to 'chat'
   const getInitialViewMode = (): 'chat' | 'tree' | 'debug' => {
@@ -75,9 +80,16 @@ const ConversationApp: React.FC = () => {
 
   const {
     conversations,
+    folders,
     currentConversation,
     conversationTree,
     loadConversations,
+    loadFolders,
+    createFolder,
+    updateFolder,
+    deleteFolder,
+    organizeConversation,
+    saveSidebarOrder,
     loadConversation,
     createConversation,
     deleteConversation,
@@ -123,7 +135,7 @@ const ConversationApp: React.FC = () => {
     retryCount?: number;
   }>(null);
   const [showAITyping, setShowAITyping] = useState(false);
-  const [editingMessage, setEditingMessage] = useState<null | { id: string; content: string; isLeaf: boolean; isFirst: boolean; originView?: 'chat' | 'tree' }>(null);
+  const [editingMessage, setEditingMessage] = useState<null | { id: string; content: string; isLeaf: boolean; isFirst: boolean; role?: string; originView?: 'chat' | 'tree' }>(null);
   // Delete confirmation modal state
   const [deleteRequest, setDeleteRequest] = useState<null | { messageId: string; branchName: string; content: string }>(null);
   const editModalRef = useRef<HTMLDivElement>(null);
@@ -284,7 +296,8 @@ const ConversationApp: React.FC = () => {
   // Load conversations list on mount
   useEffect(() => {
     loadConversations();
-  }, [loadConversations]);
+    loadFolders();
+  }, [loadConversations, loadFolders]);
 
   // Initialize debug mode from URL params
   useEffect(() => {
@@ -731,8 +744,7 @@ const ConversationApp: React.FC = () => {
     }
   }, [currentConversation, loadConversation, showError]);
 
-  const handleBeginEdit = useCallback((messageId: string, originalContent: string, originView: 'chat' | 'tree' = 'chat') => {
-    if (!conversationTree) return;
+  const handleBeginEdit = useCallback((messageId: string, originalContent: string, originView: 'chat' | 'tree' = 'chat') => {    if (!conversationTree) return;
     const messageNode = conversationTree.messages[messageId];
     // Determine if in-place edit should be allowed.
     // Allow if:
@@ -752,7 +764,7 @@ const ConversationApp: React.FC = () => {
       }
     }
     const isFirst = conversationTree.root_messages.includes(messageId);
-    setEditingMessage({ id: messageId, content: originalContent, isLeaf: isLeaf, isFirst: isFirst, originView });
+    setEditingMessage({ id: messageId, content: originalContent, isLeaf: isLeaf, isFirst: isFirst, role: messageNode?.role, originView });
   }, [conversationTree]);
 
   const handleCommitEdit = useCallback(async (messageId: string, newContent: string, editType: 'in-place' | 'branch', originView: 'chat' | 'tree' = 'chat') => {
@@ -789,6 +801,124 @@ const ConversationApp: React.FC = () => {
     }
   }, [currentConversation, loadConversation, showError, setCurrentBranch, setViewMode, setSelectedMessage]);
 
+  // Edits the stored text of any message (typically an AI response) so later turns use the pruned context
+  const handleCommitContentEdit = useCallback(async (messageId: string, newContent: string) => {
+    if (!currentConversation) return;
+    try {
+      await axios.put(`${API_BASE}/conversations/${currentConversation.id}/messages/${messageId}/content`, {
+        content: newContent
+      });
+      setEditingMessage(null);
+      await loadConversation(currentConversation.id);
+    } catch (error: any) {
+      console.error('Failed to edit message content:', error);
+      showError(error.response?.data?.detail || 'Failed to edit message.');
+    }
+  }, [currentConversation, loadConversation, showError]);
+
+  const summarizeRequestBody = useCallback(() => ({
+    llm_model: selectedModel,
+    client_api_key: sessionStorage.getItem('chatbranch_api_key') || localStorage.getItem('chatbranch_api_key') || undefined
+  }), [selectedModel]);
+
+  const handleSummarizeMessage = useCallback(async (messageId: string) => {
+    if (!currentConversation) return;
+    setLoading(true);
+    try {
+      const response = await axios.post(
+        `${API_BASE}/conversations/${currentConversation.id}/messages/${messageId}/summarize`,
+        summarizeRequestBody()
+      );
+      await loadConversation(currentConversation.id);
+      if (response.data?.id) setSelectedMessage(response.data.id);
+    } catch (error: any) {
+      console.error('Failed to summarize message:', error);
+      showError(error.response?.data?.detail || 'Failed to summarize message.');
+    } finally {
+      setLoading(false);
+    }
+  }, [currentConversation, loadConversation, showError, setLoading, setSelectedMessage, summarizeRequestBody]);
+
+  const handleSummarizeBranch = useCallback(async (branchName: string) => {
+    if (!currentConversation) return;
+    setLoading(true);
+    try {
+      const response = await axios.post(
+        `${API_BASE}/conversations/${currentConversation.id}/branches/${encodeURIComponent(branchName)}/summarize`,
+        summarizeRequestBody()
+      );
+      await loadConversation(currentConversation.id);
+      if (response.data?.id) setSelectedMessage(response.data.id);
+    } catch (error: any) {
+      console.error('Failed to summarize branch:', error);
+      showError(error.response?.data?.detail || 'Failed to summarize branch.');
+    } finally {
+      setLoading(false);
+    }
+  }, [currentConversation, loadConversation, showError, setLoading, setSelectedMessage, summarizeRequestBody]);
+
+  const handleRateBranch = useCallback(async (branchName: string, rating: number) => {
+    if (!currentConversation) return;
+    try {
+      await axios.patch(
+        `${API_BASE}/conversations/${currentConversation.id}/branches/${encodeURIComponent(branchName)}/rating`,
+        { rating }
+      );
+      await loadConversation(currentConversation.id);
+    } catch (error: any) {
+      console.error('Failed to rate branch:', error);
+      showError(error.response?.data?.detail || 'Failed to rate branch.');
+    }
+  }, [currentConversation, loadConversation, showError]);
+
+  const handleDuplicateBranch = useCallback(async (branchName: string) => {
+    if (!currentConversation) return;
+    setLoading(true);
+    try {
+      const response = await axios.post(
+        `${API_BASE}/conversations/${currentConversation.id}/branches/${encodeURIComponent(branchName)}/duplicate`,
+        {}
+      );
+      await loadConversations();
+      if (response.data?.id) {
+        setCurrentBranch('main');
+        setSelectedMessage(null);
+        navigate(`/conversation/${response.data.id}`);
+      }
+    } catch (error: any) {
+      console.error('Failed to duplicate branch:', error);
+      showError(error.response?.data?.detail || 'Failed to create a conversation from this branch.');
+    } finally {
+      setLoading(false);
+    }
+  }, [currentConversation, loadConversations, navigate, setLoading, setSelectedMessage, showError]);
+
+  const handleDuplicateFullContext = useCallback(async (messageId: string) => {
+    if (!currentConversation) return;
+    setLoading(true);
+    try {
+      const response = await axios.post(
+        `${API_BASE}/conversations/${currentConversation.id}/messages/${messageId}/duplicate-full`,
+        {}
+      );
+      await loadConversations();
+      if (response.data?.id) {
+        setCurrentBranch('main');
+        setSelectedMessage(null);
+        navigate(`/conversation/${response.data.id}`);
+      }
+    } catch (error: any) {
+      console.error('Failed to duplicate full context:', error);
+      showError(error.response?.data?.detail || 'Failed to create a conversation from the full context.');
+    } finally {
+      setLoading(false);
+    }
+  }, [currentConversation, loadConversations, navigate, setLoading, setSelectedMessage, showError]);
+
+  const getBranchRating = useCallback((branchName: string): number => {    const branch = conversationTree?.branches?.find((b: any) => b.name === branchName);
+    return branch?.rating || 0;
+  }, [conversationTree]);
+
   return (
     <div className="App">
       <HeaderControls
@@ -814,11 +944,17 @@ const ConversationApp: React.FC = () => {
       <div className="main-container">
         <ConversationSidebar
           conversations={conversations}
+          folders={folders}
           currentConversation={currentConversation}
           onLoadConversation={handleLoadConversation}
           onCreateConversation={handleCreateConversation}
           onRenameConversation={handleRenameConversation}
           onDeleteConversation={handleDeleteConversation}
+          onCreateFolder={createFolder}
+          onUpdateFolder={updateFolder}
+          onDeleteFolder={deleteFolder}
+          onRecolorConversation={(id, color) => organizeConversation(id, { color })}
+          onReorder={saveSidebarOrder}
         />
 
         <div className="content-area">
@@ -838,6 +974,11 @@ const ConversationApp: React.FC = () => {
                     selectedMessage={selectedMessage || undefined}
                     conversationTree={conversationTree}
                     onRequestDelete={requestDeleteMessage}
+                    onSummarizeMessage={handleSummarizeMessage}
+                    onSummarizeBranch={handleSummarizeBranch}
+                    onDuplicateBranch={handleDuplicateBranch}
+                    onDuplicateFullContext={handleDuplicateFullContext}
+                    onRateBranch={handleRateBranch}
                   />
                 </div>
               ) : viewMode === 'debug' && debugMode ? (
@@ -865,6 +1006,12 @@ const ConversationApp: React.FC = () => {
                   showAITyping={showAITyping}
                   onRetrySendMessage={handleRetrySendMessage}
                   onBeginEdit={handleBeginEdit}
+                  branchRating={getBranchRating(currentBranch)}
+                  onRateBranch={handleRateBranch}
+                  onSummarizeMessage={handleSummarizeMessage}
+                  onSummarizeBranch={handleSummarizeBranch}
+                  onDuplicateBranch={handleDuplicateBranch}
+                  busy={loading}
                 />
               )}
 
@@ -885,8 +1032,8 @@ const ConversationApp: React.FC = () => {
       {/* Edit Message Modal */}
       {editingMessage && (
         <div className="modal-overlay">
-          <div className="modal" ref={editModalRef}>
-            <h3>Edit Message</h3>
+          <div className="modal edit-modal" ref={editModalRef} role="dialog" aria-modal="true" aria-labelledby="edit-message-title">
+            <h3 id="edit-message-title">Edit Message</h3>
             <textarea
               value={editingMessage.content}
               onChange={(e) => setEditingMessage({ ...editingMessage, content: e.target.value })}
@@ -894,20 +1041,32 @@ const ConversationApp: React.FC = () => {
               autoFocus
             />
             <div className="modal-buttons-vertical">
-              <button
-                onClick={() => handleCommitEdit(editingMessage.id, editingMessage.content, 'in-place', editingMessage.originView || 'chat')}
-                disabled={!editingMessage.isLeaf}
-                title={editingMessage.isLeaf ? "Replaces the current message. This will regenerate the assistant reply (if present)." : "Can only edit the last message of a branch in-place"}
-              >
-                ✏️ Save In-place
-              </button>
-              <button 
-                onClick={() => handleCommitEdit(editingMessage.id, editingMessage.content, 'branch', editingMessage.originView || 'chat')}
-                disabled={editingMessage.isFirst}
-                title={editingMessage.isFirst ? "Cannot create a branch from the very first message" : "Preserves history by creating a new branch from the previous message."}
-              >
-                🌿 Save as New Branch
-              </button>
+              {editingMessage.role === 'assistant' && (
+                <button
+                  onClick={() => handleCommitContentEdit(editingMessage.id, editingMessage.content)}
+                  title="Saves the edited response as-is. Later messages in this branch use this text as context."
+                >
+                  💾 Save Response (updates context)
+                </button>
+              )}
+              {editingMessage.role !== 'assistant' && (
+                <>
+                  <button
+                    onClick={() => handleCommitEdit(editingMessage.id, editingMessage.content, 'in-place', editingMessage.originView || 'chat')}
+                    disabled={!editingMessage.isLeaf}
+                    title={editingMessage.isLeaf ? "Replaces the current message. This will regenerate the assistant reply (if present)." : "Can only edit the last message of a branch in-place"}
+                  >
+                    ✏️ Save In-place
+                  </button>
+                  <button 
+                    onClick={() => handleCommitEdit(editingMessage.id, editingMessage.content, 'branch', editingMessage.originView || 'chat')}
+                    disabled={editingMessage.isFirst}
+                    title={editingMessage.isFirst ? "Cannot create a branch from the very first message" : "Preserves history by creating a new branch from the previous message."}
+                  >
+                    🌿 Save as New Branch
+                  </button>
+                </>
+              )}
               <button className="cancel-button" onClick={() => setEditingMessage(null)}>
                 Cancel
               </button>
@@ -1003,7 +1162,7 @@ const ConversationApp: React.FC = () => {
 // Home component for conversation list
 const Home: React.FC = () => {
   const navigate = useNavigate();
-  const { conversations, loadConversations, createConversation, deleteConversation, renameConversation } = useConversations();
+  const { conversations, folders, loadConversations, loadFolders, createConversation, deleteConversation, renameConversation, createFolder, updateFolder, deleteFolder, organizeConversation, saveSidebarOrder } = useConversations();
   
   // Error modal state
   const [showErrorModal, setShowErrorModal] = useState(false);
@@ -1017,7 +1176,8 @@ const Home: React.FC = () => {
   
   useEffect(() => {
     loadConversations();
-  }, [loadConversations]);
+    loadFolders();
+  }, [loadConversations, loadFolders]);
 
   const handleLoadConversation = useCallback(async (conversationId: string) => {
     navigate(`/conversation/${conversationId}`);
@@ -1080,11 +1240,17 @@ const Home: React.FC = () => {
       <div className="main-container">
         <ConversationSidebar
           conversations={conversations}
+          folders={folders}
           currentConversation={null}
           onLoadConversation={handleLoadConversation}
           onCreateConversation={handleCreateConversation}
           onRenameConversation={handleRenameConversation}
           onDeleteConversation={handleDeleteConversation}
+          onCreateFolder={createFolder}
+          onUpdateFolder={updateFolder}
+          onDeleteFolder={deleteFolder}
+          onRecolorConversation={(id, color) => organizeConversation(id, { color })}
+          onReorder={saveSidebarOrder}
         />
         <div className="content-area">
           <EmptyState onCreateConversation={handleCreateConversation} />

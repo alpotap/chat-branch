@@ -1,4 +1,5 @@
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from typing import List, Dict, Optional, Any
 import uuid
 import os
@@ -14,7 +15,7 @@ from openrouter import OpenRouter
 
 load_dotenv()
 
-from .models import Conversation, Message, Branch, User
+from .models import Conversation, Message, Branch, User, Folder
 from .schemas import ConversationCreate, MessageCreate, BranchCreate, ConversationTree, MessageNode, ConversationResponse, BranchResponse, UserResponse, Token
 from .auth import verify_password, get_password_hash, create_access_token
 
@@ -41,10 +42,91 @@ class ConversationService:
         ).first()
     
     def list_conversations(self, db: Session, user_id: str) -> List[Conversation]:
-        """Get all conversations for a specific user ordered by creation date (newest first)"""
+        """Get all conversations for a specific user, ordered by their manual position then recency"""
         return db.query(Conversation).filter(
             Conversation.user_id == user_id
-        ).order_by(Conversation.created_at.desc()).all()
+        ).order_by(Conversation.position.asc(), Conversation.created_at.desc()).all()
+
+    def list_folders(self, db: Session, user_id: str) -> List[Folder]:
+        """Get all sidebar folders for a user in manual order"""
+        return db.query(Folder).filter(
+            Folder.user_id == user_id
+        ).order_by(Folder.position.asc(), Folder.created_at.asc()).all()
+
+    def create_folder(self, db: Session, user_id: str, name: str, color: Optional[str] = None) -> Folder:
+        max_position = db.query(func.max(Folder.position)).filter(Folder.user_id == user_id).scalar()
+        folder = Folder(
+            user_id=user_id,
+            name=name,
+            color=color or "#667eea",
+            position=(max_position or 0) + 1,
+            created_at=datetime.now(timezone.utc)
+        )
+        db.add(folder)
+        db.commit()
+        db.refresh(folder)
+        return folder
+
+    def update_folder(self, db: Session, folder_id: str, user_id: str, name: Optional[str] = None, color: Optional[str] = None, position: Optional[int] = None) -> Folder:
+        folder = db.query(Folder).filter(Folder.id == folder_id, Folder.user_id == user_id).first()
+        if not folder:
+            raise ValueError("Folder not found or access denied.")
+        if name is not None:
+            folder.name = name
+        if color is not None:
+            folder.color = color
+        if position is not None:
+            folder.position = position
+        db.commit()
+        db.refresh(folder)
+        return folder
+
+    def delete_folder(self, db: Session, folder_id: str, user_id: str) -> bool:
+        """Delete a folder; its conversations move back to the sidebar root"""
+        folder = db.query(Folder).filter(Folder.id == folder_id, Folder.user_id == user_id).first()
+        if not folder:
+            return False
+        db.query(Conversation).filter(
+            Conversation.folder_id == folder_id,
+            Conversation.user_id == user_id
+        ).update({Conversation.folder_id: None})
+        db.delete(folder)
+        db.commit()
+        return True
+
+    def organize_conversation(self, db: Session, conversation_id: str, user_id: str, folder_id: Optional[str] = None, color: Optional[str] = None, position: Optional[int] = None, clear_folder: bool = False) -> Conversation:
+        conversation = self.get_conversation(db, conversation_id, user_id)
+        if not conversation:
+            raise ValueError("Conversation not found or does not belong to user")
+        if clear_folder:
+            conversation.folder_id = None
+        elif folder_id is not None:
+            folder = db.query(Folder).filter(Folder.id == folder_id, Folder.user_id == user_id).first()
+            if not folder:
+                raise ValueError("Folder not found or access denied.")
+            conversation.folder_id = folder_id
+        if color is not None:
+            conversation.color = color
+        if position is not None:
+            conversation.position = position
+        db.commit()
+        db.refresh(conversation)
+        return conversation
+
+    def apply_sidebar_order(self, db: Session, user_id: str, folders: List[Dict], conversations: List[Dict]) -> None:
+        """Persist the sidebar layout after a drag & drop reorder"""
+        for item in folders:
+            folder = db.query(Folder).filter(Folder.id == item["id"], Folder.user_id == user_id).first()
+            if folder:
+                folder.position = item["position"]
+        for item in conversations:
+            conversation = db.query(Conversation).filter(
+                Conversation.id == item["id"], Conversation.user_id == user_id
+            ).first()
+            if conversation:
+                conversation.position = item["position"]
+                conversation.folder_id = item.get("folder_id")
+        db.commit()
     
     def delete_conversation(self, db: Session, conversation_id: str, user_id: str) -> bool:
         """Delete a conversation and all its related data"""
@@ -156,6 +238,20 @@ class ConversationService:
     
     def get_message_context(self, db: Session, conversation_id: str, branch_name: str, user_id: str, parent_message_id: Optional[str] = None) -> List[Dict]:
         """Get the conversation context for LLM - builds proper branch history"""
+        context_messages = self.get_branch_thread_messages(db, conversation_id, branch_name, user_id)
+
+        # Convert to standard LLM message format
+        llm_context = []
+        for msg in context_messages:
+            llm_context.append({
+                "role": msg.role,  # "user" or "assistant" 
+                "content": msg.content
+            })
+        
+        return llm_context
+
+    def get_branch_thread_messages(self, db: Session, conversation_id: str, branch_name: str, user_id: str) -> List[Message]:
+        """Ordered messages that make up a branch: parent history up to the branch point, then the branch itself"""
         
         # Get all messages in the conversation for this user
         all_messages = db.query(Message).filter(
@@ -188,8 +284,6 @@ class ConversationService:
         
         if branch_point_msg_id and branch_name != "main":
             # For non-main branches: get all main branch messages up to branch point, then add branch messages
-            message_dict = {msg.id: msg for msg in all_messages}
-            
             # Get all main branch messages
             main_messages = [msg for msg in all_messages if msg.branch_name == "main"]
             main_messages_sorted = sorted(main_messages, key=lambda x: x.created_at)
@@ -215,16 +309,160 @@ class ConversationService:
             # For main branch or when no branch point: use all messages in chronological order
             context_messages = sorted(branch_messages, key=lambda x: x.created_at)
         
-        # Convert to standard LLM message format
-        llm_context = []
-        for msg in context_messages:
-            llm_context.append({
-                "role": msg.role,  # "user" or "assistant" 
-                "content": msg.content
-            })
-        
-        return llm_context
+        return context_messages
+
+    def get_branch_tip_message(self, db: Session, conversation_id: str, branch_name: str, user_id: str) -> Optional[Message]:
+        """Last active message of a branch, used as the parent for appended messages"""
+        thread = self.get_branch_thread_messages(db, conversation_id, branch_name, user_id)
+        return thread[-1] if thread else None
+
+    def add_summary_message(self, db: Session, conversation_id: str, branch_name: str, content: str, user_id: str, llm_model: Optional[str] = None) -> Message:
+        """Append a summary message to the tip of a branch"""
+        tip = self.get_branch_tip_message(db, conversation_id, branch_name, user_id)
+        db_message = Message(
+            conversation_id=conversation_id,
+            content=content,
+            role="assistant",
+            parent_id=tip.id if tip else None,
+            branch_name=branch_name,
+            llm_model=llm_model,
+            user_id=user_id,
+            is_summary=True,
+            created_at=datetime.now(timezone.utc)
+        )
+        db.add(db_message)
+        db.commit()
+        db.refresh(db_message)
+        return db_message
+
+    def update_message_content(self, db: Session, conversation_id: str, message_id: str, new_content: str, user_id: str) -> Message:
+        """Edit any message's content without regenerating replies (used for pruning context)"""
+        message = db.query(Message).filter(
+            Message.id == message_id,
+            Message.conversation_id == conversation_id,
+            Message.user_id == user_id
+        ).first()
+
+        if not message:
+            raise ValueError("Message not found or access denied.")
+
+        message.content = new_content
+        db.commit()
+        db.refresh(message)
+        return message
+
+    def set_branch_rating(self, db: Session, conversation_id: str, branch_name: str, rating: int, user_id: str) -> Branch:
+        """Set a 0-5 star rating on a branch"""
+        if rating < 0 or rating > 5:
+            raise ValueError("Rating must be between 0 and 5.")
+
+        branch = db.query(Branch).filter(
+            Branch.conversation_id == conversation_id,
+            Branch.name == branch_name,
+            Branch.user_id == user_id
+        ).first()
+
+        if not branch:
+            # 'main' has no Branch row until it is rated; create one anchored to its first message
+            first_message = db.query(Message).filter(
+                Message.conversation_id == conversation_id,
+                Message.user_id == user_id,
+                Message.branch_name == branch_name
+            ).order_by(Message.created_at).first()
+            if not first_message:
+                raise ValueError(f"Branch '{branch_name}' not found.")
+            branch = Branch(
+                conversation_id=conversation_id,
+                user_id=user_id,
+                name=branch_name,
+                created_from_message_id=first_message.id,
+                created_at=datetime.now(timezone.utc)
+            )
+            db.add(branch)
+
+        branch.rating = rating
+        db.commit()
+        db.refresh(branch)
+        return branch
+
+    def copy_branch_to_new_conversation(self, db: Session, conversation_id: str, branch_name: str, user_id: str, title: Optional[str] = None) -> Conversation:
+        """Copy a branch (including its inherited parent context) into a brand new conversation"""
+        source = self.get_conversation(db, conversation_id, user_id)
+        if not source:
+            raise ValueError("Conversation not found or does not belong to user")
+
+        thread = self.get_branch_thread_messages(db, conversation_id, branch_name, user_id)
+        if not thread:
+            raise ValueError(f"Branch '{branch_name}' has no messages to copy.")
+
+        return self._create_conversation_from_messages(
+            db, thread, user_id, title or f"{source.title} ({branch_name})"
+        )
+
+    def copy_full_context_to_new_conversation(self, db: Session, conversation_id: str, message_id: str, user_id: str, title: Optional[str] = None) -> Conversation:
+        """Copy a message and every ancestor (across all parent branches) into a new conversation"""
+        source = self.get_conversation(db, conversation_id, user_id)
+        if not source:
+            raise ValueError("Conversation not found or does not belong to user")
+
+        messages = db.query(Message).filter(
+            Message.conversation_id == conversation_id,
+            Message.user_id == user_id,
+            Message.is_active == True
+        ).all()
+        by_id = {str(msg.id): msg for msg in messages}
+
+        current = by_id.get(str(message_id))
+        if not current:
+            raise ValueError("Message not found or access denied.")
+
+        # Walk the parent chain to the root; this crosses every intermediate branch
+        chain: List[Message] = []
+        visited = set()
+        while current is not None and str(current.id) not in visited:
+            visited.add(str(current.id))
+            chain.append(current)
+            current = by_id.get(str(current.parent_id)) if current.parent_id else None
+        chain.reverse()
+
+        return self._create_conversation_from_messages(
+            db, chain, user_id, title or f"{source.title} (full context)"
+        )
+
+    def _create_conversation_from_messages(self, db: Session, thread: List[Message], user_id: str, title: str) -> Conversation:
+        """Create a new conversation containing copies of the supplied messages as a single main branch"""
+        new_conversation = Conversation(
+            title=title,
+            user_id=user_id,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
+        )
+        db.add(new_conversation)
+        db.flush()
+
+        parent_id = None
+        for msg in thread:
+            copied = Message(
+                conversation_id=new_conversation.id,
+                user_id=user_id,
+                parent_id=parent_id,
+                content=msg.content,
+                role=msg.role,
+                llm_provider=msg.llm_provider,
+                llm_model=msg.llm_model,
+                branch_name="main",
+                is_summary=bool(msg.is_summary),
+                created_at=msg.created_at
+            )
+            db.add(copied)
+            db.flush()
+            parent_id = copied.id
+
+        db.commit()
+        db.refresh(new_conversation)
+        return new_conversation
     
+
     def edit_message_in_place(self, db: Session, conversation_id: str, message_id: str, new_content: str, user_id: str) -> Message:
         """Edits a message in-place, with safety checks."""
         message = db.query(Message).filter(
@@ -753,6 +991,7 @@ class ConversationService:
                 branch_name=msg.branch_name,
                 llm_model=msg.llm_model,
                 created_at=msg.created_at,
+                is_summary=bool(msg.is_summary),
                 children=[]
             )
         
@@ -791,7 +1030,8 @@ class ConversationService:
                 name=branch.name,
                 created_from_message_id=str(branch.created_from_message_id),
                 created_at=branch.created_at,
-                color=branch.color
+                color=branch.color,
+                rating=branch.rating or 0
             ) 
             for branch in branches
         ]

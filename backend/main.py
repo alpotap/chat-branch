@@ -15,18 +15,21 @@ import uuid
 from datetime import datetime, timezone
 
 from app.database import get_db, engine
-from app.models import Base, Conversation, Message, Branch, User
+from app.models import Base, Conversation, Message, Branch, User, Folder
 from app.schemas import (
     ConversationCreate, ConversationResponse, 
     MessageCreate, MessageResponse,
     BranchCreate, BranchResponse,
-    ConversationTree, UserLogin, UserResponse, Token, LoginResponse
+    ConversationTree, UserLogin, UserResponse, Token, LoginResponse,
+    FolderCreate, FolderUpdate, FolderResponse, ConversationOrganize, SidebarOrder
 )
 from app.services import ConversationService, LLMService, AuthService
 from app.auth import verify_token
 
 # Create tables
 Base.metadata.create_all(bind=engine)
+from database.init_tables import apply_schema_upgrades
+apply_schema_upgrades()
 
 # Check for default users on startup
 def check_user_setup():
@@ -115,6 +118,66 @@ async def get_current_user(
 async def root():
     return {"message": "ChatBranch API is running"}
 
+@app.get("/folders", response_model=List[FolderResponse])
+async def list_folders(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """List the user's sidebar folders in manual order"""
+    return [FolderResponse.model_validate(f) for f in conversation_service.list_folders(db, current_user.id)]
+
+@app.post("/folders", response_model=FolderResponse)
+async def create_folder(
+    folder: FolderCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Create a sidebar folder"""
+    created = conversation_service.create_folder(db, current_user.id, folder.name, folder.color)
+    return FolderResponse.model_validate(created)
+
+@app.patch("/folders/{folder_id}", response_model=FolderResponse)
+async def update_folder(
+    folder_id: str,
+    folder: FolderUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Rename, recolor or reposition a folder"""
+    try:
+        updated = conversation_service.update_folder(
+            db, folder_id, current_user.id, folder.name, folder.color, folder.position
+        )
+        return FolderResponse.model_validate(updated)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+@app.delete("/folders/{folder_id}")
+async def delete_folder(
+    folder_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Delete a folder; its conversations move back to the sidebar root"""
+    if not conversation_service.delete_folder(db, folder_id, current_user.id):
+        raise HTTPException(status_code=404, detail="Folder not found")
+    return {"message": "Folder deleted"}
+
+@app.put("/sidebar/order")
+async def update_sidebar_order(
+    order: SidebarOrder,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Persist folder/conversation ordering and folder membership after a drag & drop"""
+    conversation_service.apply_sidebar_order(
+        db,
+        current_user.id,
+        [item.model_dump() for item in order.folders],
+        [item.model_dump() for item in order.conversations],
+    )
+    return {"message": "Sidebar order updated"}
+
 @app.get("/models/ollama")
 async def list_ollama_models(current_user: User = Depends(get_current_user)):
     """List models installed in the Ollama instance running on the Docker host"""
@@ -171,12 +234,7 @@ async def create_conversation(
     db_conversation = conversation_service.create_conversation(db, conversation, current_user.id)
     
     # Explicitly convert to ensure proper serialization
-    return ConversationResponse(
-        id=str(db_conversation.id),
-        title=db_conversation.title,
-        created_at=db_conversation.created_at,
-        updated_at=db_conversation.updated_at
-    )
+    return ConversationResponse.model_validate(db_conversation)
 
 @app.get("/conversations", response_model=List[ConversationResponse])
 async def list_conversations(
@@ -185,15 +243,30 @@ async def list_conversations(
 ):
     """Get all conversations for the current user"""
     conversations = conversation_service.list_conversations(db, current_user.id)
-    return [
-        ConversationResponse(
-            id=str(conv.id),
-            title=conv.title,
-            created_at=conv.created_at,
-            updated_at=conv.updated_at
-        ) 
-        for conv in conversations
-    ]
+    return [ConversationResponse.model_validate(conv) for conv in conversations]
+
+@app.patch("/conversations/{conversation_id}/organize", response_model=ConversationResponse)
+async def organize_conversation(
+    conversation_id: str,
+    organize: ConversationOrganize,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Move a conversation into a folder, recolor it or change its position"""
+    try:
+        payload = organize.model_dump(exclude_unset=True)
+        updated = conversation_service.organize_conversation(
+            db,
+            conversation_id,
+            current_user.id,
+            folder_id=organize.folder_id,
+            color=organize.color,
+            position=organize.position,
+            clear_folder=('folder_id' in payload and organize.folder_id is None),
+        )
+        return ConversationResponse.model_validate(updated)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/conversations/{conversation_id}", response_model=ConversationTree)
 async def get_conversation(
@@ -470,6 +543,172 @@ async def get_branches(
     """Get all branches in a conversation"""
     branches = conversation_service.get_branches(db, conversation_id, current_user.id)
     return {"branches": branches}
+
+@app.patch("/conversations/{conversation_id}/branches/{branch_name}/rating")
+async def update_branch_rating(
+    conversation_id: str,
+    branch_name: str,
+    request: dict,  # Expects {"rating": 0-5}
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Set the 5-star rating of a branch"""
+    try:
+        rating = int(request.get("rating", 0))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Rating must be an integer between 0 and 5.")
+
+    try:
+        branch = conversation_service.set_branch_rating(db, conversation_id, branch_name, rating, current_user.id)
+        return {"branch_name": branch.name, "rating": branch.rating}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/conversations/{conversation_id}/branches/{branch_name}/duplicate", response_model=ConversationResponse)
+async def duplicate_branch_as_conversation(
+    conversation_id: str,
+    branch_name: str,
+    request: dict = None,  # Optional {"title": "..."}
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Copy a branch and everything it inherits from its parents into a new conversation"""
+    try:
+        new_conversation = conversation_service.copy_branch_to_new_conversation(
+            db, conversation_id, branch_name, current_user.id, (request or {}).get("title")
+        )
+        return ConversationResponse.model_validate(new_conversation)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to duplicate branch: {str(e)}")
+
+@app.post("/conversations/{conversation_id}/messages/{message_id}/duplicate-full", response_model=ConversationResponse)
+async def duplicate_full_context_as_conversation(
+    conversation_id: str,
+    message_id: str,
+    request: dict = None,  # Optional {"title": "..."}
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Copy a message and all of its parents, across every intermediate branch, into a new conversation"""
+    try:
+        new_conversation = conversation_service.copy_full_context_to_new_conversation(
+            db, conversation_id, message_id, current_user.id, (request or {}).get("title")
+        )
+        return ConversationResponse.model_validate(new_conversation)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to duplicate context: {str(e)}")
+
+@app.put("/conversations/{conversation_id}/messages/{message_id}/content", response_model=MessageResponse)
+async def update_message_content(
+    conversation_id: str,
+    message_id: str,
+    request: dict,  # Expects {"content": "new content"}
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Edit any message (including AI responses) without regenerating replies.
+
+    The edited text is what later messages in the branch will use as context.
+    """
+    new_content = request.get("content")
+    if new_content is None or not str(new_content).strip():
+        raise HTTPException(status_code=400, detail="New content not provided.")
+    try:
+        updated = conversation_service.update_message_content(
+            db, conversation_id, message_id, new_content, current_user.id
+        )
+        return MessageResponse.from_orm(updated)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+async def _generate_summary(context: List[dict], model: Optional[str], client_api_key: Optional[str], instruction: str) -> str:
+    """Ask the LLM for a summary of the supplied context"""
+    summary_context = list(context)
+    summary_context.append({"role": "user", "content": instruction})
+    try:
+        summary = await llm_service.generate_response(
+            summary_context,
+            model=model or "demo-response",
+            client_api_key=client_api_key
+        )
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Summarization failed: {str(e)}")
+
+    if not summary or not summary.strip():
+        raise HTTPException(status_code=503, detail="The AI model returned an empty summary.")
+    return summary.strip()
+
+@app.post("/conversations/{conversation_id}/messages/{message_id}/summarize", response_model=MessageResponse)
+async def summarize_message(
+    conversation_id: str,
+    message_id: str,
+    request: dict = None,  # Optional {"llm_model": "...", "client_api_key": "..."}
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Summarize a single message and append the result as a summary message"""
+    conversation = conversation_service.get_conversation(db, conversation_id, current_user.id)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    message = db.query(Message).filter(
+        Message.id == message_id,
+        Message.conversation_id == conversation_id,
+        Message.user_id == current_user.id
+    ).first()
+    if not message:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    options = request or {}
+    summary = await _generate_summary(
+        [{"role": "user", "content": message.content}],
+        options.get("llm_model"),
+        options.get("client_api_key"),
+        "Summarize the message above concisely, keeping the key points and any decisions."
+    )
+
+    title = f"Summary of {conversation.title} {message.branch_name}"
+    summary_message = conversation_service.add_summary_message(
+        db, conversation_id, message.branch_name, f"**{title}**\n\n{summary}", current_user.id, options.get("llm_model")
+    )
+    return MessageResponse.from_orm(summary_message)
+
+@app.post("/conversations/{conversation_id}/branches/{branch_name}/summarize", response_model=MessageResponse)
+async def summarize_branch(
+    conversation_id: str,
+    branch_name: str,
+    request: dict = None,  # Optional {"llm_model": "...", "client_api_key": "..."}
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Summarize a whole branch and append the result as a summary message"""
+    conversation = conversation_service.get_conversation(db, conversation_id, current_user.id)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    context = conversation_service.get_message_context(db, conversation_id, branch_name, current_user.id)
+    if not context:
+        raise HTTPException(status_code=400, detail=f"Branch '{branch_name}' has no messages to summarize.")
+
+    options = request or {}
+    summary = await _generate_summary(
+        context,
+        options.get("llm_model"),
+        options.get("client_api_key"),
+        "Summarize the conversation above concisely: the topic, key points, decisions and open questions."
+    )
+
+    title = f"Summary of {conversation.title} {branch_name}"
+    summary_message = conversation_service.add_summary_message(
+        db, conversation_id, branch_name, f"**{title}**\n\n{summary}", current_user.id, options.get("llm_model")
+    )
+    return MessageResponse.from_orm(summary_message)
 
 @app.post("/conversations/{conversation_id}/messages/{message_id}/regenerate-branch")
 async def regenerate_message_in_branch(
