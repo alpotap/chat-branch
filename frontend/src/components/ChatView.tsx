@@ -39,6 +39,7 @@ interface ChatViewProps {
   onSummarizeBranch?: (branchName: string) => void;
   onDuplicateBranch?: (branchName: string) => void;
   busy?: boolean;
+  onSaveToNote?: (content: string, message: Message) => void;
 }
 
 const ChatView = memo(({
@@ -66,7 +67,8 @@ const ChatView = memo(({
   onSummarizeMessage,
   onSummarizeBranch,
   onDuplicateBranch,
-  busy = false
+  busy = false,
+  onSaveToNote
 }: ChatViewProps) => {
   const [isRenamingBranch, setIsRenamingBranch] = useState(false);
   const [newBranchName, setNewBranchName] = useState('');
@@ -195,6 +197,7 @@ const ChatView = memo(({
             isSelected={selectedMessage === message.id}
             depth={0}
             conversationTree={conversationTree}
+            onSaveToNote={onSaveToNote}
           />
         ))}
         {/* Optimistic user message (pending) */}
@@ -219,6 +222,7 @@ const ChatView = memo(({
             conversationTree={conversationTree}
             error={pendingUserMessage.error}
             onRetrySendMessage={onRetrySendMessage}
+            onSaveToNote={onSaveToNote}
           />
         )}
         {/* AI is typing indicator */}

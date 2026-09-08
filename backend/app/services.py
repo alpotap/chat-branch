@@ -15,8 +15,8 @@ from openrouter import OpenRouter
 
 load_dotenv()
 
-from .models import Conversation, Message, Branch, User, Folder
-from .schemas import ConversationCreate, MessageCreate, BranchCreate, ConversationTree, MessageNode, ConversationResponse, BranchResponse, UserResponse, Token
+from .models import Conversation, Message, Branch, User, Folder, NoteFolder, Note, NoteItem
+from .schemas import ConversationCreate, MessageCreate, BranchCreate, ConversationTree, MessageNode, ConversationResponse, BranchResponse, UserResponse, Token, NoteItemCreate
 from .auth import verify_password, get_password_hash, create_access_token
 
 class ConversationService:
@@ -1385,3 +1385,197 @@ class AuthService:
             token_type="bearer",
             expires_in=7 * 24 * 60 * 60  # 7 days in seconds
         )
+
+class NoteService:
+    def list_folders(self, db: Session, user_id: str) -> List[NoteFolder]:
+        """Get all note sidebar folders for a user in manual order"""
+        return db.query(NoteFolder).filter(
+            NoteFolder.user_id == user_id
+        ).order_by(NoteFolder.position.asc(), NoteFolder.created_at.asc()).all()
+
+    def create_folder(self, db: Session, user_id: str, name: str, color: Optional[str] = None) -> NoteFolder:
+        max_position = db.query(func.max(NoteFolder.position)).filter(NoteFolder.user_id == user_id).scalar()
+        folder = NoteFolder(
+            user_id=user_id,
+            name=name,
+            color=color or "#667eea",
+            position=(max_position or 0) + 1,
+            created_at=datetime.now(timezone.utc)
+        )
+        db.add(folder)
+        db.commit()
+        db.refresh(folder)
+        return folder
+
+    def update_folder(self, db: Session, folder_id: str, user_id: str, name: Optional[str] = None, color: Optional[str] = None, position: Optional[int] = None) -> NoteFolder:
+        folder = db.query(NoteFolder).filter(NoteFolder.id == folder_id, NoteFolder.user_id == user_id).first()
+        if not folder:
+            raise ValueError("Folder not found or access denied.")
+        if name is not None:
+            folder.name = name
+        if color is not None:
+            folder.color = color
+        if position is not None:
+            folder.position = position
+        db.commit()
+        db.refresh(folder)
+        return folder
+
+    def delete_folder(self, db: Session, folder_id: str, user_id: str) -> bool:
+        """Delete a folder; child notes move back to the sidebar root"""
+        folder = db.query(NoteFolder).filter(NoteFolder.id == folder_id, NoteFolder.user_id == user_id).first()
+        if not folder:
+            return False
+        db.query(Note).filter(
+            Note.folder_id == folder_id,
+            Note.user_id == user_id
+        ).update({Note.folder_id: None})
+        db.delete(folder)
+        db.commit()
+        return True
+
+    def apply_sidebar_order(self, db: Session, user_id: str, folders: List[Dict], notes: List[Dict]) -> None:
+        """Persist the note sidebar layout after a drag & drop reorder"""
+        for item in folders:
+            folder = db.query(NoteFolder).filter(NoteFolder.id == item["id"], NoteFolder.user_id == user_id).first()
+            if folder:
+                folder.position = item["position"]
+        for item in notes:
+            note = db.query(Note).filter(
+                Note.id == item["id"], Note.user_id == user_id
+            ).first()
+            if note:
+                note.position = item["position"]
+                note.folder_id = item.get("folder_id")
+        db.commit()
+
+    def list_notes(self, db: Session, user_id: str) -> List[Note]:
+        """Get all notes for a specific user, ordered by manual position then recency"""
+        notes = db.query(Note).filter(
+            Note.user_id == user_id
+        ).order_by(Note.position.asc(), Note.created_at.desc()).all()
+        for n in notes:
+            n.items_count = len(n.items) if n.items else 0
+        return notes
+
+    def get_note(self, db: Session, note_id: str, user_id: str) -> Optional[Note]:
+        return db.query(Note).filter(
+            Note.id == note_id,
+            Note.user_id == user_id
+        ).first()
+
+    def create_note(self, db: Session, user_id: str, title: str, folder_id: Optional[str] = None, color: Optional[str] = None) -> Note:
+        max_position = db.query(func.max(Note.position)).filter(
+            Note.user_id == user_id,
+            Note.folder_id == folder_id
+        ).scalar()
+        note = Note(
+            user_id=user_id,
+            title=title,
+            folder_id=folder_id,
+            color=color,
+            position=(max_position or 0) + 1,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
+        )
+        db.add(note)
+        db.commit()
+        db.refresh(note)
+        note.items_count = 0
+        return note
+
+    def update_note(self, db: Session, note_id: str, user_id: str, title: Optional[str] = None, folder_id: Optional[str] = None, color: Optional[str] = None, position: Optional[int] = None, clear_folder: bool = False) -> Note:
+        note = self.get_note(db, note_id, user_id)
+        if not note:
+            raise ValueError("Note not found or does not belong to user")
+        if title is not None:
+            note.title = title
+        if color is not None:
+            note.color = color
+        if position is not None:
+            note.position = position
+        if clear_folder:
+            note.folder_id = None
+        elif folder_id is not None:
+            note.folder_id = folder_id
+        note.updated_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(note)
+        note.items_count = len(note.items) if note.items else 0
+        return note
+
+    def delete_note(self, db: Session, note_id: str, user_id: str) -> bool:
+        note = self.get_note(db, note_id, user_id)
+        if not note:
+            return False
+        db.delete(note)
+        db.commit()
+        return True
+
+    def add_note_item(self, db: Session, note_id: str, user_id: str, item_data: NoteItemCreate) -> NoteItem:
+        note = self.get_note(db, note_id, user_id)
+        if not note:
+            raise ValueError("Note not found or does not belong to user")
+        max_pos = db.query(func.max(NoteItem.position)).filter(NoteItem.note_id == note_id).scalar()
+        item = NoteItem(
+            note_id=note_id,
+            user_id=user_id,
+            content=item_data.content,
+            position=(max_pos or 0) + 1,
+            source_type=item_data.source_type or "manual",
+            source_conversation_id=item_data.source_conversation_id,
+            source_conversation_title=item_data.source_conversation_title,
+            source_branch_name=item_data.source_branch_name,
+            source_message_id=item_data.source_message_id,
+            source_message_role=item_data.source_message_role,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc)
+        )
+        note.updated_at = datetime.now(timezone.utc)
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+        return item
+
+    def update_note_item(self, db: Session, note_id: str, item_id: str, user_id: str, content: str) -> NoteItem:
+        item = db.query(NoteItem).filter(
+            NoteItem.id == item_id,
+            NoteItem.note_id == note_id,
+            NoteItem.user_id == user_id
+        ).first()
+        if not item:
+            raise ValueError("Note item not found")
+        item.content = content
+        item.updated_at = datetime.now(timezone.utc)
+        if item.note:
+            item.note.updated_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(item)
+        return item
+
+    def delete_note_item(self, db: Session, note_id: str, item_id: str, user_id: str) -> bool:
+        item = db.query(NoteItem).filter(
+            NoteItem.id == item_id,
+            NoteItem.note_id == note_id,
+            NoteItem.user_id == user_id
+        ).first()
+        if not item:
+            return False
+        db.delete(item)
+        db.commit()
+        return True
+
+    def reorder_note_items(self, db: Session, note_id: str, user_id: str, item_ids: List[str]) -> None:
+        note = self.get_note(db, note_id, user_id)
+        if not note:
+            raise ValueError("Note not found")
+        for index, item_id in enumerate(item_ids):
+            item = db.query(NoteItem).filter(
+                NoteItem.id == item_id,
+                NoteItem.note_id == note_id,
+                NoteItem.user_id == user_id
+            ).first()
+            if item:
+                item.position = index
+        note.updated_at = datetime.now(timezone.utc)
+        db.commit()

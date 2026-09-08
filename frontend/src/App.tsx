@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { BrowserRouter as Router, Routes, Route, useParams, useNavigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
 import TreeView from './TreeView';
 import ConversationDebugger from './ConversationDebugger';
@@ -9,8 +9,12 @@ import ChatView from './components/ChatView';
 import MessageInput from './components/MessageInput';
 import EmptyState from './components/EmptyState';
 import LoginPage from './components/LoginPage';
+import NoteView from './components/NoteView';
+import SaveToNoteModal from './components/SaveToNoteModal';
+import ExpandedEditorModal from './components/ExpandedEditorModal';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { useConversations } from './hooks/useConversations';
+import { useNotes } from './hooks/useNotes';
 import useOptimisticDeletes from './hooks/useOptimisticDeletes';
 import { useMessages } from './hooks/useMessages';
 import { useBranchMessages } from './hooks/useBranchMessages';
@@ -38,6 +42,7 @@ interface UndoRedoState {
 const ConversationApp: React.FC = () => {
   const { conversationId } = useParams<{ conversationId: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [currentBranch, setCurrentBranch] = useState<string>('main');
   const [selectedModel, setSelectedModel] = useState(() => localStorage.getItem(MODEL_STORAGE_KEY) || DEFAULT_MODEL);
 
@@ -98,6 +103,72 @@ const ConversationApp: React.FC = () => {
     deleteBranch,
     setConversationTree
   } = useConversations();
+
+  const {
+    notes,
+    noteFolders,
+    loadNotes,
+    loadNoteFolders,
+    createNote,
+    updateNote,
+    deleteNote,
+    createNoteFolder,
+    updateNoteFolder,
+    deleteNoteFolder,
+    saveNoteSidebarOrder,
+    addNoteItem
+  } = useNotes();
+
+  const [sidebarTab, setSidebarTab] = useState<'chats' | 'notes'>('chats');
+  const [saveToNoteData, setSaveToNoteData] = useState<{
+    content: string;
+    source: {
+      conversationId: string;
+      conversationTitle: string;
+      branchName: string;
+      messageId: string;
+      messageRole: string;
+    };
+  } | null>(null);
+
+  useEffect(() => {
+    loadNotes();
+    loadNoteFolders();
+  }, [loadNotes, loadNoteFolders]);
+
+  useEffect(() => {
+    const branchParam = searchParams.get('branch');
+    const messageIdParam = searchParams.get('messageId');
+    if (branchParam) {
+      setCurrentBranch(branchParam);
+    }
+    if (messageIdParam) {
+      setSelectedMessage(messageIdParam);
+    }
+  }, [searchParams, setSelectedMessage]);
+
+  const handleOpenSaveToNote = useCallback((content: string, message: any) => {
+    if (!currentConversation) return;
+    setSaveToNoteData({
+      content,
+      source: {
+        conversationId: currentConversation.id,
+        conversationTitle: currentConversation.title,
+        branchName: message.branch_name || currentBranch,
+        messageId: message.id,
+        messageRole: message.role || 'assistant'
+      }
+    });
+  }, [currentConversation, currentBranch]);
+
+  const handleSaveToNoteConfirm = useCallback(async (noteId: string, itemData: any) => {
+    const result = await addNoteItem(noteId, itemData);
+    if (result) {
+      setSaveToNoteData(null);
+      return true;
+    }
+    return false;
+  }, [addNoteItem]);
 
   const {
     selectedMessage,
@@ -955,6 +1026,23 @@ const ConversationApp: React.FC = () => {
           onDeleteFolder={deleteFolder}
           onRecolorConversation={(id, color) => organizeConversation(id, { color })}
           onReorder={saveSidebarOrder}
+          activeTab={sidebarTab}
+          onTabChange={setSidebarTab}
+          notes={notes}
+          noteFolders={noteFolders}
+          currentNote={null}
+          onLoadNote={(id) => navigate(`/note/${id}`)}
+          onCreateNote={async (title) => {
+            const n = await createNote(title);
+            if (n) navigate(`/note/${n.id}`);
+          }}
+          onRenameNote={async (id, title) => updateNote(id, { title })}
+          onDeleteNote={deleteNote}
+          onCreateNoteFolder={createNoteFolder}
+          onUpdateNoteFolder={updateNoteFolder}
+          onDeleteNoteFolder={deleteNoteFolder}
+          onRecolorNote={(id, color) => updateNote(id, { color })}
+          onReorderNotes={saveNoteSidebarOrder}
         />
 
         <div className="content-area">
@@ -979,6 +1067,7 @@ const ConversationApp: React.FC = () => {
                     onDuplicateBranch={handleDuplicateBranch}
                     onDuplicateFullContext={handleDuplicateFullContext}
                     onRateBranch={handleRateBranch}
+                    onSaveToNote={handleOpenSaveToNote}
                   />
                 </div>
               ) : viewMode === 'debug' && debugMode ? (
@@ -1012,6 +1101,7 @@ const ConversationApp: React.FC = () => {
                   onSummarizeBranch={handleSummarizeBranch}
                   onDuplicateBranch={handleDuplicateBranch}
                   busy={loading}
+                  onSaveToNote={handleOpenSaveToNote}
                 />
               )}
 
@@ -1073,6 +1163,21 @@ const ConversationApp: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Save to Note Modal */}
+      {saveToNoteData && (
+        <SaveToNoteModal
+          isOpen={!!saveToNoteData}
+          content={saveToNoteData.content}
+          source={saveToNoteData.source}
+          folders={noteFolders}
+          notes={notes}
+          onSave={handleSaveToNoteConfirm}
+          onCreateFolder={createNoteFolder}
+          onCreateNote={createNote}
+          onClose={() => setSaveToNoteData(null)}
+        />
       )}
 
       {/* Error Modal */}
@@ -1159,10 +1264,196 @@ const ConversationApp: React.FC = () => {
   );
 };
 
+// NoteApp component for viewing and managing notes
+const NoteApp: React.FC = () => {
+  const { noteId } = useParams<{ noteId: string }>();
+  const navigate = useNavigate();
+
+  const {
+    conversations,
+    folders,
+    loadConversations,
+    loadFolders,
+    createConversation,
+    deleteConversation,
+    renameConversation,
+    createFolder,
+    updateFolder,
+    deleteFolder,
+    organizeConversation,
+    saveSidebarOrder
+  } = useConversations();
+
+  const {
+    notes,
+    noteFolders,
+    currentNote,
+    loadingNotes,
+    loadNotes,
+    loadNoteFolders,
+    loadNote,
+    createNote,
+    updateNote,
+    deleteNote,
+    createNoteFolder,
+    updateNoteFolder,
+    deleteNoteFolder,
+    saveNoteSidebarOrder,
+    addNoteItem,
+    updateNoteItem,
+    deleteNoteItem,
+    reorderNoteItems
+  } = useNotes();
+
+  const [sidebarTab, setSidebarTab] = useState<'chats' | 'notes'>('notes');
+  const [showNoteNotFoundModal, setShowNoteNotFoundModal] = useState(false);
+
+  useEffect(() => {
+    loadConversations();
+    loadFolders();
+    loadNotes();
+    loadNoteFolders();
+  }, [loadConversations, loadFolders, loadNotes, loadNoteFolders]);
+
+  useEffect(() => {
+    if (noteId) {
+      loadNote(noteId).catch(() => {
+        setShowNoteNotFoundModal(true);
+      });
+    }
+  }, [noteId, loadNote]);
+
+  const handleNavigateToConversation = useCallback((convId: string, branchName?: string | null, messageId?: string | null) => {
+    let url = `/conversation/${convId}`;
+    const params = new URLSearchParams();
+    if (branchName) params.set('branch', branchName);
+    if (messageId) params.set('messageId', messageId);
+    const qs = params.toString();
+    if (qs) url += `?${qs}`;
+    navigate(url);
+  }, [navigate]);
+
+  return (
+    <div className="App">
+      <HeaderControls
+        currentConversation={null}
+        currentBranch=""
+        availableBranches={[]}
+        onBranchChange={() => {}}
+        onDeleteBranch={() => {}}
+        onRenameBranch={() => {}}
+        onRecolorBranch={() => {}}
+        viewMode="chat"
+        onViewModeChange={() => {}}
+        selectedModel="google/gemma-3-27b-it:free"
+        onModelChange={() => {}}
+        debugMode={false}
+        canGoBack={false}
+        onGoBack={() => {}}
+        canGoForward={false}
+        onGoForward={() => {}}
+        hasMessages={false}
+      />
+      <div className="main-container">
+        <ConversationSidebar
+          conversations={conversations}
+          folders={folders}
+          currentConversation={null}
+          onLoadConversation={(id) => navigate(`/conversation/${id}`)}
+          onCreateConversation={async (title) => {
+            const c = await createConversation(title);
+            if (c) navigate(`/conversation/${c.id}`);
+          }}
+          onRenameConversation={renameConversation}
+          onDeleteConversation={deleteConversation}
+          onCreateFolder={createFolder}
+          onUpdateFolder={updateFolder}
+          onDeleteFolder={deleteFolder}
+          onRecolorConversation={(id, color) => organizeConversation(id, { color })}
+          onReorder={saveSidebarOrder}
+          activeTab={sidebarTab}
+          onTabChange={setSidebarTab}
+          notes={notes}
+          noteFolders={noteFolders}
+          currentNote={currentNote}
+          onLoadNote={(id) => navigate(`/note/${id}`)}
+          onCreateNote={async (title) => {
+            const n = await createNote(title);
+            if (n) navigate(`/note/${n.id}`);
+          }}
+          onRenameNote={async (id, title) => updateNote(id, { title })}
+          onDeleteNote={async (id) => {
+            await deleteNote(id);
+            navigate('/');
+          }}
+          onCreateNoteFolder={createNoteFolder}
+          onUpdateNoteFolder={updateNoteFolder}
+          onDeleteNoteFolder={deleteNoteFolder}
+          onRecolorNote={(id, color) => updateNote(id, { color })}
+          onReorderNotes={saveNoteSidebarOrder}
+        />
+        <div className="content-area">
+          {currentNote ? (
+            <NoteView
+              note={currentNote}
+              onRenameNote={async (id, title) => updateNote(id, { title })}
+              onRecolorNote={(id, color) => updateNote(id, { color })}
+              onDeleteNote={async (id) => {
+                await deleteNote(id);
+                navigate('/');
+              }}
+              onAddManualItem={(id, content) => addNoteItem(id, { content, source_type: 'manual' })}
+              onUpdateItem={updateNoteItem}
+              onDeleteItem={deleteNoteItem}
+              onReorderItems={reorderNoteItems}
+              onNavigateToConversation={handleNavigateToConversation}
+            />
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#888' }}>
+              {loadingNotes ? <p>Loading note...</p> : <p>Select a note from the sidebar.</p>}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {showNoteNotFoundModal && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <h3>Note Not Found</h3>
+            <p>This note no longer exists. It may have been deleted.</p>
+            <div style={{ textAlign: 'center', marginTop: '20px' }}>
+              <button
+                onClick={() => {
+                  setShowNoteNotFoundModal(false);
+                  navigate('/');
+                }}
+                style={{
+                  backgroundColor: '#667eea',
+                  color: 'white',
+                  border: 'none',
+                  padding: '12px 32px',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontSize: '16px',
+                  fontWeight: '500'
+                }}
+              >
+                Go to Home
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 // Home component for conversation list
 const Home: React.FC = () => {
   const navigate = useNavigate();
   const { conversations, folders, loadConversations, loadFolders, createConversation, deleteConversation, renameConversation, createFolder, updateFolder, deleteFolder, organizeConversation, saveSidebarOrder } = useConversations();
+  const { notes, noteFolders, loadNotes, loadNoteFolders, createNote, updateNote, deleteNote, createNoteFolder, updateNoteFolder, deleteNoteFolder, saveNoteSidebarOrder } = useNotes();
+  const [sidebarTab, setSidebarTab] = useState<'chats' | 'notes'>('chats');
   
   // Error modal state
   const [showErrorModal, setShowErrorModal] = useState(false);
@@ -1177,7 +1468,9 @@ const Home: React.FC = () => {
   useEffect(() => {
     loadConversations();
     loadFolders();
-  }, [loadConversations, loadFolders]);
+    loadNotes();
+    loadNoteFolders();
+  }, [loadConversations, loadFolders, loadNotes, loadNoteFolders]);
 
   const handleLoadConversation = useCallback(async (conversationId: string) => {
     navigate(`/conversation/${conversationId}`);
@@ -1251,6 +1544,23 @@ const Home: React.FC = () => {
           onDeleteFolder={deleteFolder}
           onRecolorConversation={(id, color) => organizeConversation(id, { color })}
           onReorder={saveSidebarOrder}
+          activeTab={sidebarTab}
+          onTabChange={setSidebarTab}
+          notes={notes}
+          noteFolders={noteFolders}
+          currentNote={null}
+          onLoadNote={(id) => navigate(`/note/${id}`)}
+          onCreateNote={async (title) => {
+            const n = await createNote(title);
+            if (n) navigate(`/note/${n.id}`);
+          }}
+          onRenameNote={async (id, title) => updateNote(id, { title })}
+          onDeleteNote={deleteNote}
+          onCreateNoteFolder={createNoteFolder}
+          onUpdateNoteFolder={updateNoteFolder}
+          onDeleteNoteFolder={deleteNoteFolder}
+          onRecolorNote={(id, color) => updateNote(id, { color })}
+          onReorderNotes={saveNoteSidebarOrder}
         />
         <div className="content-area">
           <EmptyState onCreateConversation={handleCreateConversation} />
@@ -1305,6 +1615,7 @@ const ProtectedApp: React.FC = () => {
     <Routes>
       <Route path="/" element={<Home />} />
       <Route path="/conversation/:conversationId" element={<ConversationApp />} />
+      <Route path="/note/:noteId" element={<NoteApp />} />
     </Routes>
   );
 };

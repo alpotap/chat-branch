@@ -48,6 +48,7 @@ interface TreeViewProps {
   conversationTree?: any;
   pendingUserMessage?: { id: string; content: string; created_at: string; error?: string; retryCount?: number } | null;
   onRetrySendMessage?: () => void;
+  onSaveToNote?: (content: string, message: Message) => void;
 }
 
 const PortalModal: React.FC<{ onClose: () => void; children: React.ReactNode }> = ({ onClose, children }) => {
@@ -87,6 +88,7 @@ const TreeView: React.FC<TreeViewProps> = ({
   ,onDuplicateBranch
   ,onDuplicateFullContext
   ,onRateBranch
+  ,onSaveToNote
 }) => {
   const TRUNCATE_LENGTH = 140;
   const normalizeContent = (s?: string) => (s || '').replace(/\s+/g, ' ').trim();
@@ -612,6 +614,7 @@ const TreeView: React.FC<TreeViewProps> = ({
           onRateBranch={onRateBranch}
           branchRating={getBranchRating(contextMenuMessage.branch_name)}
           conversationTree={conversationTree}
+          onSaveToNote={onSaveToNote}
         />
       )}
       {/* Branch Creation Dialog */}

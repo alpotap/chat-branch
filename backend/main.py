@@ -15,15 +15,18 @@ import uuid
 from datetime import datetime, timezone
 
 from app.database import get_db, engine
-from app.models import Base, Conversation, Message, Branch, User, Folder
+from app.models import Base, Conversation, Message, Branch, User, Folder, NoteFolder, Note, NoteItem
 from app.schemas import (
     ConversationCreate, ConversationResponse, 
     MessageCreate, MessageResponse,
     BranchCreate, BranchResponse,
     ConversationTree, UserLogin, UserResponse, Token, LoginResponse,
-    FolderCreate, FolderUpdate, FolderResponse, ConversationOrganize, SidebarOrder
+    FolderCreate, FolderUpdate, FolderResponse, ConversationOrganize, SidebarOrder,
+    NoteFolderCreate, NoteFolderUpdate, NoteFolderResponse, NoteSidebarOrder,
+    NoteCreate, NoteUpdate, NoteResponse, NoteDetailResponse,
+    NoteItemCreate, NoteItemUpdate, NoteItemResponse, NoteItemsOrder
 )
-from app.services import ConversationService, LLMService, AuthService
+from app.services import ConversationService, LLMService, AuthService, NoteService
 from app.auth import verify_token
 
 # Create tables
@@ -74,6 +77,7 @@ security = HTTPBearer()
 auth_service = AuthService()
 conversation_service = ConversationService()
 llm_service = LLMService()
+note_service = NoteService()
 
 # Health check endpoint
 @app.get("/health")
@@ -177,6 +181,190 @@ async def update_sidebar_order(
         [item.model_dump() for item in order.conversations],
     )
     return {"message": "Sidebar order updated"}
+
+# Note Folder routes
+@app.get("/notes/folders", response_model=List[NoteFolderResponse])
+async def list_note_folders(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """List the user's note sidebar folders in manual order"""
+    return [NoteFolderResponse.model_validate(f) for f in note_service.list_folders(db, current_user.id)]
+
+@app.post("/notes/folders", response_model=NoteFolderResponse)
+async def create_note_folder(
+    folder: NoteFolderCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Create a note sidebar folder"""
+    created = note_service.create_folder(db, current_user.id, folder.name, folder.color)
+    return NoteFolderResponse.model_validate(created)
+
+@app.patch("/notes/folders/{folder_id}", response_model=NoteFolderResponse)
+async def update_note_folder(
+    folder_id: str,
+    folder: NoteFolderUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Rename, recolor or reposition a note folder"""
+    try:
+        updated = note_service.update_folder(
+            db, folder_id, current_user.id, folder.name, folder.color, folder.position
+        )
+        return NoteFolderResponse.model_validate(updated)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+@app.delete("/notes/folders/{folder_id}")
+async def delete_note_folder(
+    folder_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Delete a note folder; its notes move back to the sidebar root"""
+    if not note_service.delete_folder(db, folder_id, current_user.id):
+        raise HTTPException(status_code=404, detail="Note folder not found")
+    return {"message": "Folder deleted"}
+
+@app.put("/notes/sidebar/order")
+async def update_note_sidebar_order(
+    order: NoteSidebarOrder,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Persist note folder and note ordering and folder membership after a drag & drop"""
+    note_service.apply_sidebar_order(
+        db,
+        current_user.id,
+        [item.model_dump() for item in order.folders],
+        [item.model_dump() for item in order.notes],
+    )
+    return {"message": "Note sidebar order updated"}
+
+# Note routes
+@app.get("/notes", response_model=List[NoteResponse])
+async def list_notes(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get all notes for the current user"""
+    notes = note_service.list_notes(db, current_user.id)
+    return [NoteResponse.model_validate(n) for n in notes]
+
+@app.post("/notes", response_model=NoteResponse)
+async def create_note(
+    note: NoteCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Create a new note"""
+    created = note_service.create_note(db, current_user.id, note.title, note.folder_id, note.color)
+    return NoteResponse.model_validate(created)
+
+@app.get("/notes/{note_id}", response_model=NoteDetailResponse)
+async def get_note(
+    note_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get a note with all its items"""
+    note = note_service.get_note(db, note_id, current_user.id)
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+    return NoteDetailResponse.model_validate(note)
+
+@app.patch("/notes/{note_id}", response_model=NoteResponse)
+async def update_note(
+    note_id: str,
+    note: NoteUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Update note title, folder, color, or position"""
+    try:
+        payload = note.model_dump(exclude_unset=True)
+        updated = note_service.update_note(
+            db,
+            note_id,
+            current_user.id,
+            title=note.title,
+            folder_id=note.folder_id,
+            color=note.color,
+            position=note.position,
+            clear_folder=('folder_id' in payload and note.folder_id is None)
+        )
+        return NoteResponse.model_validate(updated)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+@app.delete("/notes/{note_id}")
+async def delete_note(
+    note_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Delete a note and all its items"""
+    if not note_service.delete_note(db, note_id, current_user.id):
+        raise HTTPException(status_code=404, detail="Note not found")
+    return {"message": "Note deleted successfully"}
+
+# Note Item routes
+@app.post("/notes/{note_id}/items", response_model=NoteItemResponse)
+async def add_note_item(
+    note_id: str,
+    item: NoteItemCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Append a new text card to a note"""
+    try:
+        created = note_service.add_note_item(db, note_id, current_user.id, item)
+        return NoteItemResponse.model_validate(created)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+@app.put("/notes/{note_id}/items/{item_id}", response_model=NoteItemResponse)
+async def update_note_item(
+    note_id: str,
+    item_id: str,
+    item: NoteItemUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Update content of a note text card"""
+    try:
+        updated = note_service.update_note_item(db, note_id, item_id, current_user.id, item.content)
+        return NoteItemResponse.model_validate(updated)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+@app.delete("/notes/{note_id}/items/{item_id}")
+async def delete_note_item(
+    note_id: str,
+    item_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Delete a text card from a note"""
+    if not note_service.delete_note_item(db, note_id, item_id, current_user.id):
+        raise HTTPException(status_code=404, detail="Note item not found")
+    return {"message": "Note item deleted successfully"}
+
+@app.put("/notes/{note_id}/items/order")
+async def reorder_note_items(
+    note_id: str,
+    order: NoteItemsOrder,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Persist reordered text cards inside a note after drag & drop"""
+    try:
+        note_service.reorder_note_items(db, note_id, current_user.id, order.item_ids)
+        return {"message": "Note items order updated"}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 @app.get("/models/ollama")
 async def list_ollama_models(current_user: User = Depends(get_current_user)):

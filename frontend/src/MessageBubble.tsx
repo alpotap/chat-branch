@@ -30,6 +30,7 @@ interface MessageBubbleProps {
   conversationTree?: any;
   error?: string;
   onRetrySendMessage?: () => void;
+  onSaveToNote?: (content: string, message: Message) => void;
 }
 
 const MessageBubble = memo<MessageBubbleProps>(({ 
@@ -45,10 +46,12 @@ const MessageBubble = memo<MessageBubbleProps>(({
   depth,
   conversationTree,
   error,
-  onRetrySendMessage
+  onRetrySendMessage,
+  onSaveToNote
 }) => {
   const [regenBranchName, setRegenBranchName] = useState('');
   const [branchColor, setBranchColor] = useState('#3B82F6');
+  const [selectedText, setSelectedText] = useState('');
   // Context menu state (for shared ContextMenu component)
   const [showContextMenu, setShowContextMenu] = useState(false);
   const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 });
@@ -78,7 +81,8 @@ const MessageBubble = memo<MessageBubbleProps>(({
 
   const handleRightClick = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
-    // Only allow branching from assistant messages via context menu when appropriate
+    const selection = window.getSelection()?.toString().trim();
+    setSelectedText(selection || '');
     setContextMenuPos({ x: e.clientX, y: e.clientY });
     setContextMenuMessage(message);
     setShowContextMenu(true);
@@ -287,6 +291,15 @@ const MessageBubble = memo<MessageBubbleProps>(({
               🗑️ Delete
             </button>
           )}
+          {onSaveToNote && (
+            <button
+              className="msg-action-btn"
+              onClick={(e) => { e.stopPropagation(); onSaveToNote(message.content, message); }}
+              title="Save this whole message to a note"
+            >
+              📌 Add to note
+            </button>
+          )}
           <button className="copy-btn" onClick={handleCopy} title="Copy message to clipboard">
             {copied ? '✓ Copied' : '⧉ Copy'}
           </button>
@@ -307,6 +320,8 @@ const MessageBubble = memo<MessageBubbleProps>(({
           onOpenBranchDialog={handleBranchClick}
           onOpenRegenBranchDialog={handleRegenInBranchClick}
           conversationTree={conversationTree}
+          selectedText={selectedText}
+          onSaveToNote={onSaveToNote}
         />
       )}
 

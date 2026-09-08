@@ -87,3 +87,52 @@ class Branch(Base):
     user = relationship("User")
     conversation = relationship("Conversation", back_populates="branches")
     created_from_message = relationship("Message")
+
+class NoteFolder(Base):
+    __tablename__ = "note_folders"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False)
+    name = Column(String(255), nullable=False)
+    color = Column(String(7), default="#667eea")
+    position = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User")
+    notes = relationship("Note", back_populates="folder")
+
+class Note(Base):
+    __tablename__ = "notes"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False)
+    folder_id = Column(String(36), ForeignKey("note_folders.id"), nullable=True)
+    title = Column(String(255), nullable=False)
+    color = Column(String(7), nullable=True)
+    position = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = relationship("User")
+    folder = relationship("NoteFolder", back_populates="notes")
+    items = relationship("NoteItem", back_populates="note", cascade="all, delete-orphan", order_by="NoteItem.position")
+
+class NoteItem(Base):
+    __tablename__ = "note_items"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    note_id = Column(String(36), ForeignKey("notes.id"), nullable=False)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False)
+    content = Column(Text, nullable=False)
+    position = Column(Integer, default=0)
+    source_type = Column(String(50), default="manual")  # 'manual' | 'conversation'
+    source_conversation_id = Column(String(36), nullable=True)
+    source_conversation_title = Column(String(255), nullable=True)
+    source_branch_name = Column(String(100), nullable=True)
+    source_message_id = Column(String(36), nullable=True)
+    source_message_role = Column(String(20), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = relationship("User")
+    note = relationship("Note", back_populates="items")
