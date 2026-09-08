@@ -220,8 +220,10 @@ const TreeView: React.FC<TreeViewProps> = ({
     const nodes: Node[] = [];
     const edges: Edge[] = [];
     const spacingX = 320;
-    const rowY = 170;
-    const branchGapY = 120;
+    const messageHeight = 120;
+    const promptToAnswerGap = 20;
+    const answerToPromptGap = 50;
+    const branchGapY = 100;
     const { messagesByBranch, children, roots, branchPoint } = branchModel;
 
     const nodeIdForBranch = (branch: string) => `branch:${branch}`;
@@ -255,13 +257,22 @@ const TreeView: React.FC<TreeViewProps> = ({
       const x = centerCol * spacingX;
 
       if (isExpanded(branch) && list.length) {
-        list.forEach((message, index) => { positions[message.id] = { x, y: y + index * rowY }; });
+        let messageY = y;
+        list.forEach((message, index) => {
+          positions[message.id] = { x, y: messageY };
+          if (index < list.length - 1) {
+            const gap = message.role === 'user' ? promptToAnswerGap : answerToPromptGap;
+            messageY += messageHeight + gap;
+          }
+        });
       } else {
         positions[nodeIdForBranch(branch)] = { x, y };
       }
 
-      const usedRows = isExpanded(branch) ? Math.max(1, list.length) : 1;
-      const nextY = y + usedRows * rowY + branchGapY;
+      const lastMessageY = isExpanded(branch) && list.length
+        ? positions[list[list.length - 1].id].y
+        : y;
+      const nextY = lastMessageY + messageHeight + branchGapY;
       let col = colStart;
       (children[branch] || []).forEach(kid => {
         layoutBranch(kid, col, nextY);
@@ -419,7 +430,13 @@ const TreeView: React.FC<TreeViewProps> = ({
           ? branchList[branchList.length - 1].id
           : nodeIdForBranch(branchName);
         const anchorPos = positions[anchorId];
-        const pendingPos = anchorPos ? { x: anchorPos.x, y: anchorPos.y + rowY } : { x: 0, y: 0 };
+        const anchorMessage = anchorId === nodeIdForBranch(branchName)
+          ? branchList[branchList.length - 1]
+          : messages[anchorId];
+        const pendingGap = anchorMessage?.role === 'user' ? promptToAnswerGap : answerToPromptGap;
+        const pendingPos = anchorPos
+          ? { x: anchorPos.x, y: anchorPos.y + messageHeight + pendingGap }
+          : { x: 0, y: 0 };
         nodes.push({
           id: pendingUserMessage.id,
           type: 'default',
