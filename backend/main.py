@@ -15,15 +15,18 @@ import uuid
 from datetime import datetime, timezone
 
 from app.database import get_db, engine
-from app.models import Base, Conversation, Message, Branch, User, Folder
+from app.models import Base, Conversation, Message, Branch, User, Folder, NoteFolder, Note, NoteText
 from app.schemas import (
     ConversationCreate, ConversationResponse, 
     MessageCreate, MessageResponse,
     BranchCreate, BranchResponse,
     ConversationTree, UserLogin, UserResponse, Token, LoginResponse,
-    FolderCreate, FolderUpdate, FolderResponse, ConversationOrganize, SidebarOrder
+    FolderCreate, FolderUpdate, FolderResponse, ConversationOrganize, SidebarOrder,
+    NoteFolderCreate, NoteFolderUpdate, NoteFolderResponse,
+    NoteCreate, NoteResponse, NoteOrganize, NotesSidebarOrder, NoteWithTexts,
+    NoteTextCreate, NoteTextUpdate, NoteTextResponse, NoteTextReorder, SaveMessageToNote
 )
-from app.services import ConversationService, LLMService, AuthService
+from app.services import ConversationService, LLMService, AuthService, NoteService
 from app.auth import verify_token
 
 # Create tables
@@ -73,6 +76,7 @@ security = HTTPBearer()
 # Service instances
 auth_service = AuthService()
 conversation_service = ConversationService()
+note_service = NoteService()
 llm_service = LLMService()
 
 # Health check endpoint
@@ -182,6 +186,246 @@ async def update_sidebar_order(
 async def list_ollama_models(current_user: User = Depends(get_current_user)):
     """List models installed in the Ollama instance running on the Docker host"""
     return await llm_service.list_ollama_models()
+
+# --- Notes: folders ---
+
+@app.get("/note-folders", response_model=List[NoteFolderResponse])
+async def list_note_folders(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """List the user's note folders in manual order"""
+    return [NoteFolderResponse.model_validate(f) for f in note_service.list_note_folders(db, current_user.id)]
+
+@app.post("/note-folders", response_model=NoteFolderResponse)
+async def create_note_folder(
+    folder: NoteFolderCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Create a note folder"""
+    created = note_service.create_note_folder(db, current_user.id, folder.name, folder.color)
+    return NoteFolderResponse.model_validate(created)
+
+@app.patch("/note-folders/{folder_id}", response_model=NoteFolderResponse)
+async def update_note_folder(
+    folder_id: str,
+    folder: NoteFolderUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Rename, recolor or reposition a note folder"""
+    try:
+        updated = note_service.update_note_folder(
+            db, folder_id, current_user.id, folder.name, folder.color, folder.position
+        )
+        return NoteFolderResponse.model_validate(updated)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+@app.delete("/note-folders/{folder_id}")
+async def delete_note_folder(
+    folder_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Delete a note folder; its notes move back to the sidebar root"""
+    if not note_service.delete_note_folder(db, folder_id, current_user.id):
+        raise HTTPException(status_code=404, detail="Note folder not found")
+    return {"message": "Note folder deleted"}
+
+@app.put("/notes-sidebar/order")
+async def update_notes_sidebar_order(
+    order: NotesSidebarOrder,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Persist note folder/note ordering and folder membership after a drag & drop"""
+    note_service.apply_notes_sidebar_order(
+        db,
+        current_user.id,
+        [item.model_dump() for item in order.folders],
+        [item.model_dump() for item in order.notes],
+    )
+    return {"message": "Notes sidebar order updated"}
+
+# --- Notes ---
+
+@app.post("/notes", response_model=NoteResponse)
+async def create_note(
+    note: NoteCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Create a new note"""
+    created = note_service.create_note(db, current_user.id, note.title, note.folder_id)
+    return NoteResponse.model_validate(created)
+
+@app.get("/notes", response_model=List[NoteResponse])
+async def list_notes(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get all notes for the current user"""
+    return [NoteResponse.model_validate(n) for n in note_service.list_notes(db, current_user.id)]
+
+@app.get("/notes/{note_id}", response_model=NoteWithTexts)
+async def get_note(
+    note_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get a note along with its ordered list of texts"""
+    note = note_service.get_note(db, note_id, current_user.id)
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+    texts = note_service.list_note_texts(db, note_id, current_user.id)
+    result = NoteResponse.model_validate(note).model_dump()
+    result["texts"] = [NoteTextResponse.model_validate(t) for t in texts]
+    return result
+
+@app.patch("/notes/{note_id}/organize", response_model=NoteResponse)
+async def organize_note(
+    note_id: str,
+    organize: NoteOrganize,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Move a note into a folder, recolor it or change its position"""
+    try:
+        payload = organize.model_dump(exclude_unset=True)
+        updated = note_service.organize_note(
+            db,
+            note_id,
+            current_user.id,
+            folder_id=organize.folder_id,
+            color=organize.color,
+            position=organize.position,
+            clear_folder=('folder_id' in payload and organize.folder_id is None),
+        )
+        return NoteResponse.model_validate(updated)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.put("/notes/{note_id}/rename")
+async def rename_note(
+    note_id: str,
+    new_title: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Rename a note"""
+    try:
+        note_service.rename_note(db, note_id, current_user.id, new_title)
+        return {"message": "Note renamed successfully", "new_title": new_title}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+@app.delete("/notes/{note_id}")
+async def delete_note(
+    note_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Delete a note and all its texts"""
+    if not note_service.delete_note(db, note_id, current_user.id):
+        raise HTTPException(status_code=404, detail="Note not found")
+    return {"message": "Note deleted successfully"}
+
+# --- Note texts ---
+
+@app.post("/notes/{note_id}/texts", response_model=NoteTextResponse)
+async def create_note_text(
+    note_id: str,
+    text: NoteTextCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Add a text entry (manual or copied from a conversation) to the end of a note"""
+    try:
+        created = note_service.create_note_text(
+            db, note_id, current_user.id, text.content,
+            source_type=text.source_type or "manual",
+            source_conversation_id=text.source_conversation_id,
+            source_message_id=text.source_message_id,
+            source_branch_name=text.source_branch_name,
+            source_label=text.source_label,
+        )
+        return NoteTextResponse.model_validate(created)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+@app.put("/notes/{note_id}/texts/reorder")
+async def reorder_note_texts(
+    note_id: str,
+    reorder: NoteTextReorder,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Persist note text ordering after a drag & drop"""
+    note_service.reorder_note_texts(
+        db, note_id, current_user.id, [item.model_dump() for item in reorder.items]
+    )
+    return {"message": "Note text order updated"}
+
+# Note: this dynamic {text_id} route must stay registered after the static "reorder" route above,
+# otherwise FastAPI would match "reorder" as a text_id.
+@app.put("/notes/{note_id}/texts/{text_id}", response_model=NoteTextResponse)
+async def update_note_text(
+    note_id: str,
+    text_id: str,
+    text: NoteTextUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Edit the content of a note text"""
+    try:
+        updated = note_service.update_note_text_content(db, note_id, text_id, current_user.id, text.content)
+        return NoteTextResponse.model_validate(updated)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+@app.delete("/notes/{note_id}/texts/{text_id}")
+async def delete_note_text(
+    note_id: str,
+    text_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Delete a note text"""
+    if not note_service.delete_note_text(db, note_id, text_id, current_user.id):
+        raise HTTPException(status_code=404, detail="Note text not found")
+    return {"message": "Note text deleted"}
+
+
+@app.post("/conversations/{conversation_id}/messages/{message_id}/save-to-note", response_model=NoteTextResponse)
+async def save_message_to_note(
+    conversation_id: str,
+    message_id: str,
+    payload: SaveMessageToNote,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Copy a message (or a selected portion of it) into a note as a new text entry"""
+    conversation = conversation_service.get_conversation(db, conversation_id, current_user.id)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    message = db.query(Message).filter(
+        Message.id == message_id, Message.conversation_id == conversation_id, Message.user_id == current_user.id
+    ).first()
+    if not message:
+        raise HTTPException(status_code=404, detail="Message not found")
+    try:
+        created = note_service.save_message_to_note(
+            db, current_user.id, payload.note_id, payload.content,
+            source_conversation_id=conversation_id,
+            source_message_id=message_id,
+            source_branch_name=message.branch_name,
+            source_label=payload.source_label or conversation.title,
+        )
+        return NoteTextResponse.model_validate(created)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 # Authentication routes
 @app.post("/auth/login", response_model=LoginResponse)

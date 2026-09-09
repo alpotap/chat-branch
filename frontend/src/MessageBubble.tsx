@@ -1,4 +1,4 @@
-import React, { useState, memo, useCallback } from 'react';
+import React, { useState, memo, useCallback, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { getBranchColor as getUtilBranchColor, getBranchColorFromTree, getRandomBranchColor, BRANCH_COLORS } from './utils/branchColors';
@@ -25,6 +25,8 @@ interface MessageBubbleProps {
   onBeginEdit: (messageId: string, originalContent: string) => void;
   onRequestDelete?: (message: Message) => void;
   onSummarize?: (messageId: string) => void;
+  onAddToNote?: (message: Message) => void;
+  onSaveSelectionToNote?: (selectedText: string, message: Message) => void;
   isSelected: boolean;
   depth: number;
   conversationTree?: any;
@@ -41,6 +43,8 @@ const MessageBubble = memo<MessageBubbleProps>(({
   onBeginEdit,
   onRequestDelete,
   onSummarize,
+  onAddToNote,
+  onSaveSelectionToNote,
   isSelected,
   depth,
   conversationTree,
@@ -59,6 +63,7 @@ const MessageBubble = memo<MessageBubbleProps>(({
   const [branchName, setBranchName] = useState('');
   const [showRegenBranchDialog, setShowRegenBranchDialog] = useState(false);
   const [copied, setCopied] = useState(false);
+  const lastSelectionRef = useRef('');
 
   const handleCopy = useCallback(async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -78,6 +83,8 @@ const MessageBubble = memo<MessageBubbleProps>(({
 
   const handleRightClick = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
+    // Capture any active text selection so the context menu can offer "Save selection to note"
+    lastSelectionRef.current = window.getSelection()?.toString() || '';
     // Only allow branching from assistant messages via context menu when appropriate
     setContextMenuPos({ x: e.clientX, y: e.clientY });
     setContextMenuMessage(message);
@@ -287,6 +294,11 @@ const MessageBubble = memo<MessageBubbleProps>(({
               🗑️ Delete
             </button>
           )}
+          {onAddToNote && (
+            <button className="msg-action-btn" onClick={(e) => { e.stopPropagation(); onAddToNote(message); }} title="Save this message to a note">
+              📝 Add to note
+            </button>
+          )}
           <button className="copy-btn" onClick={handleCopy} title="Copy message to clipboard">
             {copied ? '✓ Copied' : '⧉ Copy'}
           </button>
@@ -306,6 +318,8 @@ const MessageBubble = memo<MessageBubbleProps>(({
           onSummarize={onSummarize}
           onOpenBranchDialog={handleBranchClick}
           onOpenRegenBranchDialog={handleRegenInBranchClick}
+          onSaveSelectionToNote={onSaveSelectionToNote ? (() => onSaveSelectionToNote(lastSelectionRef.current, contextMenuMessage)) : undefined}
+          selectedText={lastSelectionRef.current}
           conversationTree={conversationTree}
         />
       )}

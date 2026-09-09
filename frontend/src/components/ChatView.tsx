@@ -28,6 +28,8 @@ interface ChatViewProps {
   onRenameBranch: (oldName: string, newName: string) => void;
   onBeginEdit: (messageId: string, originalContent: string) => void;
   onRequestDelete?: (message: Message) => void;
+  onAddToNote?: (message: Message) => void;
+  onSaveSelectionToNote?: (selectedText: string, message: Message) => void;
   onDeselectMessage?: () => void;
   conversationTree: any;
   pendingUserMessage?: { id: string; content: string; created_at: string; error?: string; retryCount?: number } | null;
@@ -56,6 +58,8 @@ const ChatView = memo(({
   onRenameBranch,
   onDeselectMessage,
   onRequestDelete,
+  onAddToNote,
+  onSaveSelectionToNote,
   conversationTree,
   pendingUserMessage,
   showAITyping,
@@ -191,6 +195,8 @@ const ChatView = memo(({
             onRegenerate={onRegenerate}
             onBeginEdit={onBeginEdit}
                       onRequestDelete={onRequestDelete}
+            onAddToNote={onAddToNote}
+            onSaveSelectionToNote={onSaveSelectionToNote}
             onSummarize={onSummarizeMessage}
             isSelected={selectedMessage === message.id}
             depth={0}

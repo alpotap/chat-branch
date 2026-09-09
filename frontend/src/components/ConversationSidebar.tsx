@@ -33,6 +33,10 @@ interface ConversationSidebarProps {
     folders: { id: string; position: number }[],
     conversations: { id: string; position: number; folder_id?: string | null }[]
   ) => void;
+  /** Text customization so this same component can be reused for the Notes tab */
+  headerLabel?: string;
+  newItemLabel?: string;
+  itemNounSingular?: string;
 }
 
 const MIN_WIDTH = 160;
@@ -53,7 +57,10 @@ const ConversationSidebar = memo(({
   onUpdateFolder,
   onDeleteFolder,
   onRecolorConversation,
-  onReorder
+  onReorder,
+  headerLabel = 'Chats',
+  newItemLabel = '+ Chat',
+  itemNounSingular = 'Conversation'
 }: ConversationSidebarProps) => {
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [newConversationTitle, setNewConversationTitle] = useState('');
@@ -317,11 +324,11 @@ const ConversationSidebar = memo(({
     <>
       <div className={`sidebar ${collapsed ? 'collapsed' : ''}`} style={collapsed ? undefined : { width }}>
         <div className="sidebar-header">
-          {!collapsed && <h3>Chats</h3>}
+          {!collapsed && <h3>{headerLabel}</h3>}
           {!collapsed && (
             <>
-              <button onClick={() => setShowCreateDialog(true)} className="new-conversation-btn" title="New conversation">
-                + Chat
+              <button onClick={() => setShowCreateDialog(true)} className="new-conversation-btn" title={`New ${itemNounSingular.toLowerCase()}`}>
+                {newItemLabel}
               </button>
               <button onClick={() => onCreateFolder('New folder')} className="new-conversation-btn" title="New folder">
                 + Folder
@@ -427,10 +434,10 @@ const ConversationSidebar = memo(({
       {showCreateDialog && (
         <div className="modal-overlay">
           <div className="modal">
-            <h3>New Conversation</h3>
+            <h3>New {itemNounSingular}</h3>
             <input
               type="text"
-              placeholder="Conversation title (optional)"
+              placeholder={`${itemNounSingular} title (optional)`}
               value={newConversationTitle}
               onChange={(e) => setNewConversationTitle(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && handleCreateConversation()}
@@ -448,10 +455,10 @@ const ConversationSidebar = memo(({
       {showDeleteModal && (
         <div className="modal-overlay">
           <div className="modal">
-            <h3>{folderToDelete ? 'Delete Folder' : 'Delete Conversation'}</h3>
+            <h3>{folderToDelete ? 'Delete Folder' : `Delete ${itemNounSingular}`}</h3>
             <p>
               {folderToDelete
-                ? `Delete folder "${folderToDelete.name}"? Its conversations move back to the root.`
+                ? `Delete folder "${folderToDelete.name}"? Its ${itemNounSingular.toLowerCase()}s move back to the root.`
                 : `Delete "${conversationToDelete?.title}"? This cannot be undone.`}
             </p>
             <div className="modal-buttons">

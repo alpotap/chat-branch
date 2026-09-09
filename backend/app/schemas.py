@@ -189,5 +189,115 @@ class LoginResponse(BaseModel):
 class TokenData(BaseModel):
     user_id: Optional[str] = None
 
+# Note-taking schemas
+class NoteFolderCreate(BaseModel):
+    name: str
+    color: Optional[str] = "#667eea"
+
+class NoteFolderUpdate(BaseModel):
+    name: Optional[str] = None
+    color: Optional[str] = None
+    position: Optional[int] = None
+
+class NoteFolderResponse(BaseModel):
+    id: str
+    name: str
+    color: str
+    position: int = 0
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+    @field_validator('id', mode='before')
+    @classmethod
+    def convert_id_to_string(cls, v: Union[str, uuid.UUID]) -> str:
+        return str(v) if isinstance(v, uuid.UUID) else v
+
+class NoteCreate(BaseModel):
+    title: str
+    folder_id: Optional[str] = None
+
+class NoteResponse(BaseModel):
+    id: str
+    title: str
+    folder_id: Optional[str] = None
+    color: Optional[str] = None
+    position: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+    @field_validator('id', mode='before')
+    @classmethod
+    def convert_id_to_string(cls, v: Union[str, uuid.UUID]) -> str:
+        return str(v) if isinstance(v, uuid.UUID) else v
+
+class NoteOrganize(BaseModel):
+    folder_id: Optional[str] = None
+    color: Optional[str] = None
+    position: Optional[int] = None
+
+class NotesSidebarOrderItem(BaseModel):
+    id: str
+    position: int
+    folder_id: Optional[str] = None
+
+class NotesSidebarOrder(BaseModel):
+    folders: List[NotesSidebarOrderItem] = []
+    notes: List[NotesSidebarOrderItem] = []
+
+class NoteTextCreate(BaseModel):
+    content: str
+    source_type: Optional[str] = "manual"
+    source_conversation_id: Optional[str] = None
+    source_message_id: Optional[str] = None
+    source_branch_name: Optional[str] = None
+    source_label: Optional[str] = None
+
+class NoteTextUpdate(BaseModel):
+    content: str
+
+class NoteTextResponse(BaseModel):
+    id: str
+    note_id: str
+    content: str
+    position: int = 0
+    created_at: datetime
+    updated_at: datetime
+    source_type: str = "manual"
+    source_conversation_id: Optional[str] = None
+    source_message_id: Optional[str] = None
+    source_branch_name: Optional[str] = None
+    source_label: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+    @field_validator('id', 'note_id', 'source_conversation_id', 'source_message_id', mode='before')
+    @classmethod
+    def convert_id_to_string(cls, v: Union[str, uuid.UUID, None]) -> Optional[str]:
+        if v is None:
+            return None
+        return str(v) if isinstance(v, uuid.UUID) else v
+
+class NoteTextReorderItem(BaseModel):
+    id: str
+    position: int
+
+class NoteTextReorder(BaseModel):
+    items: List[NoteTextReorderItem] = []
+
+class NoteWithTexts(NoteResponse):
+    texts: List[NoteTextResponse] = []
+
+class SaveMessageToNote(BaseModel):
+    note_id: str
+    content: str
+    source_label: Optional[str] = None
+
 # Update forward references
 MessageNode.model_rebuild()
+

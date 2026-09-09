@@ -30,6 +30,8 @@ interface ContextMenuProps {
   onRateBranch?: (branchName: string, rating: number) => void;
   branchRating?: number;
   conversationTree?: any;
+  onSaveSelectionToNote?: () => void;
+  selectedText?: string;
 }
 
 const ContextMenu: React.FC<ContextMenuProps> = ({
@@ -50,6 +52,8 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
   onRateBranch,
   branchRating = 0,
   conversationTree,
+  onSaveSelectionToNote,
+  selectedText,
 }) => {
   const canRegenerate = () => {
     if (!message || message.role !== 'assistant') return false;
@@ -88,6 +92,11 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
         {onSummarize && (
           <button onClick={() => { onSummarize(message.id); onClose(); }}>
             🧠 Summarize Message
+          </button>
+        )}
+        {onSaveSelectionToNote && selectedText && selectedText.trim() && (
+          <button onClick={() => { onSaveSelectionToNote(); onClose(); }}>
+            📝 Save selection to note
           </button>
         )}
         {message.role === 'user' && onRequestDelete && (

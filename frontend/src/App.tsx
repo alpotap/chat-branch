@@ -9,11 +9,15 @@ import ChatView from './components/ChatView';
 import MessageInput from './components/MessageInput';
 import EmptyState from './components/EmptyState';
 import LoginPage from './components/LoginPage';
+import TextEditorModal from './components/TextEditorModal';
+import NotesPanel from './components/NotesPanel';
+import NoteDestinationPicker from './components/NoteDestinationPicker';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { useConversations } from './hooks/useConversations';
 import useOptimisticDeletes from './hooks/useOptimisticDeletes';
 import { useMessages } from './hooks/useMessages';
 import { useBranchMessages } from './hooks/useBranchMessages';
+import { useNotesTab } from './hooks/useNotesTab';
 import { resolveModelRequestFields } from './utils/providerResolution';
 import './App.css';
 
@@ -110,6 +114,36 @@ const ConversationApp: React.FC = () => {
     sendMessage,
     createBranch
   } = useMessages();
+
+  const {
+    sidebarTab,
+    setSidebarTab,
+    noteFolders,
+    notes,
+    currentNote,
+    handleSelectNote,
+    handleCreateNote,
+    handleRenameNote,
+    handleDeleteNote,
+    handleRecolorNote,
+    createNoteFolder,
+    updateNoteFolder,
+    deleteNoteFolder,
+    reorderNotesSidebar,
+    createNoteText,
+    updateNoteText,
+    deleteNoteText,
+    reorderNoteTexts,
+    saveMessageToNote
+  } = useNotesTab();
+
+  // Pending "save to note" flow (Add to note button / selection save) - opens the destination picker
+  const [pendingNoteSave, setPendingNoteSave] = useState<null | {
+    conversationId: string;
+    messageId: string;
+    content: string;
+    sourceLabel: string;
+  }>(null);
 
   const {
     allBranchMessages,
@@ -613,6 +647,43 @@ const ConversationApp: React.FC = () => {
     setIntentionallyDeselected(false); // Reset intentional deselection flag
   }, [setSelectedMessage, conversationTree, currentBranch, isNavigating, saveToHistory, viewMode, setCurrentBranch]);
 
+  const handleConfirmSaveToNote = useCallback(async (noteId: string) => {
+    if (!pendingNoteSave) return;
+    await saveMessageToNote(pendingNoteSave.conversationId, pendingNoteSave.messageId, noteId, pendingNoteSave.content, pendingNoteSave.sourceLabel);
+    const note = notes.find(n => n.id === noteId);
+    localStorage.setItem('chatbranch-last-note-location', JSON.stringify({ folderId: note?.folder_id ?? null, noteId }));
+    setPendingNoteSave(null);
+    setSidebarTab('notes');
+  }, [pendingNoteSave, saveMessageToNote, notes, setSidebarTab]);
+
+  const handleNavigateToSource = useCallback((sourceConversationId: string, messageId: string, branchName?: string | null) => {
+    setSidebarTab('chats');
+    if (currentConversation?.id === sourceConversationId) {
+      setCurrentBranch(branchName || 'main');
+      handleMessageSelect(messageId);
+    } else {
+      localStorage.setItem('chatbranch-pending-note-nav', JSON.stringify({ conversationId: sourceConversationId, messageId, branchName }));
+      navigate(`/conversation/${sourceConversationId}`);
+    }
+  }, [currentConversation, setSidebarTab, setCurrentBranch, handleMessageSelect, navigate]);
+
+  // Apply a pending source-navigation request (set by handleNavigateToSource) once the target conversation has loaded
+  useEffect(() => {
+    if (!conversationTree || !currentConversation) return;
+    const raw = localStorage.getItem('chatbranch-pending-note-nav');
+    if (!raw) return;
+    try {
+      const pending = JSON.parse(raw);
+      if (pending.conversationId === currentConversation.id) {
+        setCurrentBranch(pending.branchName || 'main');
+        handleMessageSelect(pending.messageId);
+        localStorage.removeItem('chatbranch-pending-note-nav');
+      }
+    } catch {
+      localStorage.removeItem('chatbranch-pending-note-nav');
+    }
+  }, [conversationTree, currentConversation, handleMessageSelect]);
+
   const handleDeselectMessage = useCallback(() => {
     setSelectedMessage(null);
     setIntentionallyDeselected(true);
@@ -824,6 +895,27 @@ const ConversationApp: React.FC = () => {
     }
   }, [currentConversation, loadConversation, showError]);
 
+  // --- Save to note (Add to note button / selection save) ---
+  const handleAddToNote = useCallback((message: { id: string; content: string }) => {
+    if (!currentConversation) return;
+    setPendingNoteSave({
+      conversationId: currentConversation.id,
+      messageId: message.id,
+      content: message.content,
+      sourceLabel: currentConversation.title
+    });
+  }, [currentConversation]);
+
+  const handleSaveSelectionToNote = useCallback((selectedText: string, message: { id: string }) => {
+    if (!currentConversation || !selectedText.trim()) return;
+    setPendingNoteSave({
+      conversationId: currentConversation.id,
+      messageId: message.id,
+      content: selectedText,
+      sourceLabel: currentConversation.title
+    });
+  }, [currentConversation]);
+
   const summarizeRequestBody = useCallback(() => resolveModelRequestFields(selectedModel), [selectedModel]);
 
   const handleSummarizeMessage = useCallback(async (messageId: string) => {
@@ -947,23 +1039,59 @@ const ConversationApp: React.FC = () => {
       />
 
       <div className="main-container">
-        <ConversationSidebar
-          conversations={conversations}
-          folders={folders}
-          currentConversation={currentConversation}
-          onLoadConversation={handleLoadConversation}
-          onCreateConversation={handleCreateConversation}
-          onRenameConversation={handleRenameConversation}
-          onDeleteConversation={handleDeleteConversation}
-          onCreateFolder={createFolder}
-          onUpdateFolder={updateFolder}
-          onDeleteFolder={deleteFolder}
-          onRecolorConversation={(id, color) => organizeConversation(id, { color })}
-          onReorder={saveSidebarOrder}
-        />
+        <div className="sidebar-with-tabs">
+          <div className="sidebar-tabs">
+            <button className={sidebarTab === 'chats' ? 'active' : ''} onClick={() => setSidebarTab('chats')}>💬 Chats</button>
+            <button className={sidebarTab === 'notes' ? 'active' : ''} onClick={() => setSidebarTab('notes')}>📝 Notes</button>
+          </div>
+          {sidebarTab === 'chats' ? (
+            <ConversationSidebar
+              conversations={conversations}
+              folders={folders}
+              currentConversation={currentConversation}
+              onLoadConversation={handleLoadConversation}
+              onCreateConversation={handleCreateConversation}
+              onRenameConversation={handleRenameConversation}
+              onDeleteConversation={handleDeleteConversation}
+              onCreateFolder={createFolder}
+              onUpdateFolder={updateFolder}
+              onDeleteFolder={deleteFolder}
+              onRecolorConversation={(id, color) => organizeConversation(id, { color })}
+              onReorder={saveSidebarOrder}
+            />
+          ) : (
+            <ConversationSidebar
+              conversations={notes}
+              folders={noteFolders}
+              currentConversation={currentNote}
+              onLoadConversation={handleSelectNote}
+              onCreateConversation={handleCreateNote}
+              onRenameConversation={handleRenameNote}
+              onDeleteConversation={handleDeleteNote}
+              onCreateFolder={createNoteFolder}
+              onUpdateFolder={updateNoteFolder}
+              onDeleteFolder={deleteNoteFolder}
+              onRecolorConversation={handleRecolorNote}
+              onReorder={reorderNotesSidebar}
+              headerLabel="Notes"
+              newItemLabel="+ Note"
+              itemNounSingular="Note"
+            />
+          )}
+        </div>
 
         <div className="content-area">
-          {currentConversation ? (
+          {sidebarTab === 'notes' ? (
+            <NotesPanel
+              note={currentNote}
+              folderName={currentNote ? noteFolders.find(f => f.id === currentNote.folder_id)?.name : null}
+              onAddText={(content) => currentNote && createNoteText(currentNote.id, { content, source_type: 'manual' })}
+              onEditText={(textId, content) => currentNote && updateNoteText(currentNote.id, textId, content)}
+              onDeleteText={(textId) => currentNote && deleteNoteText(currentNote.id, textId)}
+              onReorderTexts={(items) => currentNote && reorderNoteTexts(currentNote.id, items)}
+              onNavigateToSource={handleNavigateToSource}
+            />
+          ) : currentConversation ? (
             <>
               {viewMode === 'tree' && conversationTree ? (
                 <div className="tree-container">
@@ -1016,6 +1144,8 @@ const ConversationApp: React.FC = () => {
                   onSummarizeMessage={handleSummarizeMessage}
                   onSummarizeBranch={handleSummarizeBranch}
                   onDuplicateBranch={handleDuplicateBranch}
+                  onAddToNote={handleAddToNote}
+                  onSaveSelectionToNote={handleSaveSelectionToNote}
                   busy={loading}
                 />
               )}
@@ -1036,49 +1166,62 @@ const ConversationApp: React.FC = () => {
       
       {/* Edit Message Modal */}
       {editingMessage && (
-        <div className="modal-overlay">
-          <div className="modal edit-modal" ref={editModalRef} role="dialog" aria-modal="true" aria-labelledby="edit-message-title">
-            <h3 id="edit-message-title">Edit Message</h3>
-            <textarea
-              value={editingMessage.content}
-              onChange={(e) => setEditingMessage({ ...editingMessage, content: e.target.value })}
-              className="edit-textarea"
-              autoFocus
-            />
-            <div className="modal-buttons-vertical">
-              {editingMessage.role === 'assistant' && (
-                <button
-                  onClick={() => handleCommitContentEdit(editingMessage.id, editingMessage.content)}
-                  title="Saves the edited response as-is. Later messages in this branch use this text as context."
-                >
-                  💾 Save Response (updates context)
-                </button>
-              )}
-              {editingMessage.role !== 'assistant' && (
-                <>
-                  <button
-                    onClick={() => handleCommitEdit(editingMessage.id, editingMessage.content, 'in-place', editingMessage.originView || 'chat')}
-                    disabled={!editingMessage.isLeaf}
-                    title={editingMessage.isLeaf ? "Replaces the current message. This will regenerate the assistant reply (if present)." : "Can only edit the last message of a branch in-place"}
-                  >
-                    ✏️ Save In-place
-                  </button>
-                  <button 
-                    onClick={() => handleCommitEdit(editingMessage.id, editingMessage.content, 'branch', editingMessage.originView || 'chat')}
-                    disabled={editingMessage.isFirst}
-                    title={editingMessage.isFirst ? "Cannot create a branch from the very first message" : "Preserves history by creating a new branch from the previous message."}
-                  >
-                    🌿 Save as New Branch
-                  </button>
-                </>
-              )}
-              <button className="cancel-button" onClick={() => setEditingMessage(null)}>
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
+        <TextEditorModal
+          title="Edit Message"
+          initialContent={editingMessage.content}
+          modalRef={editModalRef}
+          onCancel={() => setEditingMessage(null)}
+          actions={[
+            ...(editingMessage.role === 'assistant' ? [{
+              label: '💾 Save Response (updates context)',
+              title: 'Saves the edited response as-is. Later messages in this branch use this text as context.',
+              onClick: (content: string) => handleCommitContentEdit(editingMessage.id, content)
+            }] : []),
+            ...(editingMessage.role !== 'assistant' ? [
+              {
+                label: '✏️ Save In-place',
+                disabled: !editingMessage.isLeaf,
+                title: editingMessage.isLeaf ? "Replaces the current message. This will regenerate the assistant reply (if present)." : "Can only edit the last message of a branch in-place",
+                onClick: (content: string) => handleCommitEdit(editingMessage.id, content, 'in-place', editingMessage.originView || 'chat')
+              },
+              {
+                label: '🌿 Save as New Branch',
+                disabled: editingMessage.isFirst,
+                title: editingMessage.isFirst ? "Cannot create a branch from the very first message" : "Preserves history by creating a new branch from the previous message.",
+                onClick: (content: string) => handleCommitEdit(editingMessage.id, content, 'branch', editingMessage.originView || 'chat')
+              }
+            ] : [])
+          ]}
+        />
       )}
+
+      {/* Save to Note destination picker */}
+      {pendingNoteSave && (() => {
+        const lastLocationRaw = localStorage.getItem('chatbranch-last-note-location');
+        let lastFolderId: string | null = null;
+        let lastNoteId: string | null = null;
+        if (lastLocationRaw) {
+          try {
+            const parsed = JSON.parse(lastLocationRaw);
+            lastFolderId = parsed.folderId ?? null;
+            lastNoteId = parsed.noteId ?? null;
+          } catch {
+            // ignore malformed value
+          }
+        }
+        return (
+          <NoteDestinationPicker
+            noteFolders={noteFolders}
+            notes={notes}
+            defaultFolderId={lastFolderId}
+            defaultNoteId={lastNoteId}
+            onConfirm={handleConfirmSaveToNote}
+            onCancel={() => setPendingNoteSave(null)}
+            onCreateFolder={createNoteFolder}
+            onCreateNote={handleCreateNote}
+          />
+        );
+      })()}
 
       {/* Error Modal */}
       {showErrorModal && (
@@ -1168,6 +1311,32 @@ const ConversationApp: React.FC = () => {
 const Home: React.FC = () => {
   const navigate = useNavigate();
   const { conversations, folders, loadConversations, loadFolders, createConversation, deleteConversation, renameConversation, createFolder, updateFolder, deleteFolder, organizeConversation, saveSidebarOrder } = useConversations();
+  const {
+    sidebarTab,
+    setSidebarTab,
+    noteFolders,
+    notes,
+    currentNote,
+    handleSelectNote,
+    handleCreateNote,
+    handleRenameNote,
+    handleDeleteNote,
+    handleRecolorNote,
+    createNoteFolder,
+    updateNoteFolder,
+    deleteNoteFolder,
+    reorderNotesSidebar,
+    createNoteText,
+    updateNoteText,
+    deleteNoteText,
+    reorderNoteTexts
+  } = useNotesTab();
+
+  const handleNavigateToSource = useCallback((sourceConversationId: string, messageId: string, branchName?: string | null) => {
+    setSidebarTab('chats');
+    localStorage.setItem('chatbranch-pending-note-nav', JSON.stringify({ conversationId: sourceConversationId, messageId, branchName }));
+    navigate(`/conversation/${sourceConversationId}`);
+  }, [setSidebarTab, navigate]);
   
   // Error modal state
   const [showErrorModal, setShowErrorModal] = useState(false);
@@ -1243,22 +1412,60 @@ const Home: React.FC = () => {
         hasMessages={false}
       />
       <div className="main-container">
-        <ConversationSidebar
-          conversations={conversations}
-          folders={folders}
-          currentConversation={null}
-          onLoadConversation={handleLoadConversation}
-          onCreateConversation={handleCreateConversation}
-          onRenameConversation={handleRenameConversation}
-          onDeleteConversation={handleDeleteConversation}
-          onCreateFolder={createFolder}
-          onUpdateFolder={updateFolder}
-          onDeleteFolder={deleteFolder}
-          onRecolorConversation={(id, color) => organizeConversation(id, { color })}
-          onReorder={saveSidebarOrder}
-        />
+        <div className="sidebar-with-tabs">
+          <div className="sidebar-tabs">
+            <button className={sidebarTab === 'chats' ? 'active' : ''} onClick={() => setSidebarTab('chats')}>💬 Chats</button>
+            <button className={sidebarTab === 'notes' ? 'active' : ''} onClick={() => setSidebarTab('notes')}>📝 Notes</button>
+          </div>
+          {sidebarTab === 'chats' ? (
+            <ConversationSidebar
+              conversations={conversations}
+              folders={folders}
+              currentConversation={null}
+              onLoadConversation={handleLoadConversation}
+              onCreateConversation={handleCreateConversation}
+              onRenameConversation={handleRenameConversation}
+              onDeleteConversation={handleDeleteConversation}
+              onCreateFolder={createFolder}
+              onUpdateFolder={updateFolder}
+              onDeleteFolder={deleteFolder}
+              onRecolorConversation={(id, color) => organizeConversation(id, { color })}
+              onReorder={saveSidebarOrder}
+            />
+          ) : (
+            <ConversationSidebar
+              conversations={notes}
+              folders={noteFolders}
+              currentConversation={currentNote}
+              onLoadConversation={handleSelectNote}
+              onCreateConversation={handleCreateNote}
+              onRenameConversation={handleRenameNote}
+              onDeleteConversation={handleDeleteNote}
+              onCreateFolder={createNoteFolder}
+              onUpdateFolder={updateNoteFolder}
+              onDeleteFolder={deleteNoteFolder}
+              onRecolorConversation={handleRecolorNote}
+              onReorder={reorderNotesSidebar}
+              headerLabel="Notes"
+              newItemLabel="+ Note"
+              itemNounSingular="Note"
+            />
+          )}
+        </div>
         <div className="content-area">
-          <EmptyState onCreateConversation={handleCreateConversation} />
+          {sidebarTab === 'notes' ? (
+            <NotesPanel
+              note={currentNote}
+              folderName={currentNote ? noteFolders.find(f => f.id === currentNote.folder_id)?.name : null}
+              onAddText={(content) => currentNote && createNoteText(currentNote.id, { content, source_type: 'manual' })}
+              onEditText={(textId, content) => currentNote && updateNoteText(currentNote.id, textId, content)}
+              onDeleteText={(textId) => currentNote && deleteNoteText(currentNote.id, textId)}
+              onReorderTexts={(items) => currentNote && reorderNoteTexts(currentNote.id, items)}
+              onNavigateToSource={handleNavigateToSource}
+            />
+          ) : (
+            <EmptyState onCreateConversation={handleCreateConversation} />
+          )}
         </div>
       </div>
       
