@@ -42,16 +42,32 @@ class ConversationService:
         ).first()
     
     def list_conversations(self, db: Session, user_id: str) -> List[Conversation]:
-        """Get all conversations for a specific user, ordered by their manual position then recency"""
+        """Get all non-archived conversations for a specific user, ordered by their manual position then recency"""
         return db.query(Conversation).filter(
-            Conversation.user_id == user_id
+            Conversation.user_id == user_id,
+            Conversation.is_archived.is_(False)
         ).order_by(Conversation.position.asc(), Conversation.created_at.desc()).all()
 
     def list_folders(self, db: Session, user_id: str) -> List[Folder]:
-        """Get all sidebar folders for a user in manual order"""
+        """Get all non-archived sidebar folders for a user in manual order"""
         return db.query(Folder).filter(
-            Folder.user_id == user_id
+            Folder.user_id == user_id,
+            Folder.is_archived.is_(False)
         ).order_by(Folder.position.asc(), Folder.created_at.asc()).all()
+
+    def list_archived_conversations(self, db: Session, user_id: str) -> List[Conversation]:
+        """Get all archived conversations for a user, most recently archived first"""
+        return db.query(Conversation).filter(
+            Conversation.user_id == user_id,
+            Conversation.is_archived.is_(True)
+        ).order_by(Conversation.archived_at.desc()).all()
+
+    def list_archived_folders(self, db: Session, user_id: str) -> List[Folder]:
+        """Get all archived folders for a user, most recently archived first"""
+        return db.query(Folder).filter(
+            Folder.user_id == user_id,
+            Folder.is_archived.is_(True)
+        ).order_by(Folder.archived_at.desc()).all()
 
     def create_folder(self, db: Session, user_id: str, name: str, color: Optional[str] = None) -> Folder:
         max_position = db.query(func.max(Folder.position)).filter(Folder.user_id == user_id).scalar()
@@ -94,6 +110,31 @@ class ConversationService:
         db.commit()
         return True
 
+    def archive_folder(self, db: Session, folder_id: str, user_id: str) -> bool:
+        """Archive a folder along with all conversations currently inside it"""
+        folder = db.query(Folder).filter(Folder.id == folder_id, Folder.user_id == user_id).first()
+        if not folder:
+            return False
+        now = datetime.now(timezone.utc)
+        folder.is_archived = True
+        folder.archived_at = now
+        db.query(Conversation).filter(
+            Conversation.folder_id == folder_id,
+            Conversation.user_id == user_id
+        ).update({Conversation.is_archived: True, Conversation.archived_at: now})
+        db.commit()
+        return True
+
+    def restore_folder(self, db: Session, folder_id: str, user_id: str) -> bool:
+        """Restore an archived folder itself (its conversations are restored independently)"""
+        folder = db.query(Folder).filter(Folder.id == folder_id, Folder.user_id == user_id).first()
+        if not folder:
+            return False
+        folder.is_archived = False
+        folder.archived_at = None
+        db.commit()
+        return True
+
     def organize_conversation(self, db: Session, conversation_id: str, user_id: str, folder_id: Optional[str] = None, color: Optional[str] = None, position: Optional[int] = None, clear_folder: bool = False) -> Conversation:
         conversation = self.get_conversation(db, conversation_id, user_id)
         if not conversation:
@@ -128,6 +169,34 @@ class ConversationService:
                 conversation.folder_id = item.get("folder_id")
         db.commit()
     
+    def archive_conversation(self, db: Session, conversation_id: str, user_id: str) -> bool:
+        """Archive a conversation instead of deleting it"""
+        conversation = self.get_conversation(db, conversation_id, user_id)
+        if not conversation:
+            return False
+        conversation.is_archived = True
+        conversation.archived_at = datetime.now(timezone.utc)
+        db.commit()
+        return True
+
+    def restore_conversation(self, db: Session, conversation_id: str, user_id: str) -> bool:
+        """Restore an archived conversation to its original folder, or to root if that folder is gone/archived"""
+        conversation = db.query(Conversation).filter(
+            Conversation.id == conversation_id, Conversation.user_id == user_id
+        ).first()
+        if not conversation:
+            return False
+        if conversation.folder_id:
+            folder = db.query(Folder).filter(
+                Folder.id == conversation.folder_id, Folder.user_id == user_id
+            ).first()
+            if not folder or folder.is_archived:
+                conversation.folder_id = None
+        conversation.is_archived = False
+        conversation.archived_at = None
+        db.commit()
+        return True
+
     def delete_conversation(self, db: Session, conversation_id: str, user_id: str) -> bool:
         """Delete a conversation and all its related data"""
         conversation = self.get_conversation(db, conversation_id, user_id)
@@ -1144,7 +1213,8 @@ class NoteService:
 
     def list_note_folders(self, db: Session, user_id: str) -> List[NoteFolder]:
         return db.query(NoteFolder).filter(
-            NoteFolder.user_id == user_id
+            NoteFolder.user_id == user_id,
+            NoteFolder.is_archived.is_(False)
         ).order_by(NoteFolder.position.asc(), NoteFolder.created_at.asc()).all()
 
     def create_note_folder(self, db: Session, user_id: str, name: str, color: Optional[str] = None) -> NoteFolder:
@@ -1188,12 +1258,50 @@ class NoteService:
         db.commit()
         return True
 
+    def archive_note_folder(self, db: Session, folder_id: str, user_id: str) -> bool:
+        """Archive a note folder along with all notes currently inside it"""
+        folder = db.query(NoteFolder).filter(NoteFolder.id == folder_id, NoteFolder.user_id == user_id).first()
+        if not folder:
+            return False
+        now = datetime.now(timezone.utc)
+        folder.is_archived = True
+        folder.archived_at = now
+        db.query(Note).filter(
+            Note.folder_id == folder_id,
+            Note.user_id == user_id
+        ).update({Note.is_archived: True, Note.archived_at: now})
+        db.commit()
+        return True
+
+    def restore_note_folder(self, db: Session, folder_id: str, user_id: str) -> bool:
+        """Restore an archived note folder itself (its notes are restored independently)"""
+        folder = db.query(NoteFolder).filter(NoteFolder.id == folder_id, NoteFolder.user_id == user_id).first()
+        if not folder:
+            return False
+        folder.is_archived = False
+        folder.archived_at = None
+        db.commit()
+        return True
+
+    def list_archived_note_folders(self, db: Session, user_id: str) -> List[NoteFolder]:
+        return db.query(NoteFolder).filter(
+            NoteFolder.user_id == user_id,
+            NoteFolder.is_archived.is_(True)
+        ).order_by(NoteFolder.archived_at.desc()).all()
+
     # --- Notes ---
 
     def list_notes(self, db: Session, user_id: str) -> List[Note]:
         return db.query(Note).filter(
-            Note.user_id == user_id
+            Note.user_id == user_id,
+            Note.is_archived.is_(False)
         ).order_by(Note.position.asc(), Note.created_at.desc()).all()
+
+    def list_archived_notes(self, db: Session, user_id: str) -> List[Note]:
+        return db.query(Note).filter(
+            Note.user_id == user_id,
+            Note.is_archived.is_(True)
+        ).order_by(Note.archived_at.desc()).all()
 
     def get_note(self, db: Session, note_id: str, user_id: str) -> Optional[Note]:
         return db.query(Note).filter(Note.id == note_id, Note.user_id == user_id).first()
@@ -1259,6 +1367,32 @@ class NoteService:
         if not note:
             return False
         db.delete(note)
+        db.commit()
+        return True
+
+    def archive_note(self, db: Session, note_id: str, user_id: str) -> bool:
+        """Archive a note instead of deleting it"""
+        note = self.get_note(db, note_id, user_id)
+        if not note:
+            return False
+        note.is_archived = True
+        note.archived_at = datetime.now(timezone.utc)
+        db.commit()
+        return True
+
+    def restore_note(self, db: Session, note_id: str, user_id: str) -> bool:
+        """Restore an archived note to its original folder, or to root if that folder is gone/archived"""
+        note = self.get_note(db, note_id, user_id)
+        if not note:
+            return False
+        if note.folder_id:
+            folder = db.query(NoteFolder).filter(
+                NoteFolder.id == note.folder_id, NoteFolder.user_id == user_id
+            ).first()
+            if not folder or folder.is_archived:
+                note.folder_id = None
+        note.is_archived = False
+        note.archived_at = None
         db.commit()
         return True
 
@@ -1370,6 +1504,7 @@ class SearchService:
                 "snippet": self._snippet(note.title, term),
                 "note_id": note.id,
                 "note_title": note.title,
+                "is_archived": note.is_archived,
             })
 
         note_text_matches = db.query(NoteText, Note).join(
@@ -1387,6 +1522,7 @@ class SearchService:
                 "note_id": note.id,
                 "note_title": note.title,
                 "text_id": text.id,
+                "is_archived": note.is_archived,
             })
 
         conversation_matches = db.query(Conversation).filter(
@@ -1400,6 +1536,7 @@ class SearchService:
                 "snippet": self._snippet(conversation.title, term),
                 "conversation_id": conversation.id,
                 "conversation_title": conversation.title,
+                "is_archived": conversation.is_archived,
             })
 
         message_matches = db.query(Message, Conversation).join(
@@ -1419,8 +1556,11 @@ class SearchService:
                 "conversation_title": conversation.title,
                 "message_id": message.id,
                 "branch_name": message.branch_name,
+                "is_archived": conversation.is_archived,
             })
 
+        # Live (non-archived) results first, archived ones after; stable sort preserves relative order within each group
+        results.sort(key=lambda r: r.get("is_archived", False))
         return results[:bounded_limit]
 
 class LLMService:

@@ -169,6 +169,38 @@ async def delete_folder(
         raise HTTPException(status_code=404, detail="Folder not found")
     return {"message": "Folder deleted"}
 
+@app.get("/folders/archived", response_model=List[FolderResponse])
+async def list_archived_folders(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """List the user's archived folders"""
+    return [FolderResponse.model_validate(f) for f in conversation_service.list_archived_folders(db, current_user.id)]
+
+@app.post("/folders/{folder_id}/archive", response_model=FolderResponse)
+async def archive_folder(
+    folder_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Archive a folder along with all conversations currently inside it"""
+    if not conversation_service.archive_folder(db, folder_id, current_user.id):
+        raise HTTPException(status_code=404, detail="Folder not found")
+    updated = db.query(Folder).filter(Folder.id == folder_id, Folder.user_id == current_user.id).first()
+    return FolderResponse.model_validate(updated)
+
+@app.post("/folders/{folder_id}/restore", response_model=FolderResponse)
+async def restore_folder(
+    folder_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Restore an archived folder"""
+    if not conversation_service.restore_folder(db, folder_id, current_user.id):
+        raise HTTPException(status_code=404, detail="Folder not found")
+    updated = db.query(Folder).filter(Folder.id == folder_id, Folder.user_id == current_user.id).first()
+    return FolderResponse.model_validate(updated)
+
 @app.put("/sidebar/order")
 async def update_sidebar_order(
     order: SidebarOrder,
@@ -236,6 +268,38 @@ async def delete_note_folder(
         raise HTTPException(status_code=404, detail="Note folder not found")
     return {"message": "Note folder deleted"}
 
+@app.get("/note-folders/archived", response_model=List[NoteFolderResponse])
+async def list_archived_note_folders(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """List the user's archived note folders"""
+    return [NoteFolderResponse.model_validate(f) for f in note_service.list_archived_note_folders(db, current_user.id)]
+
+@app.post("/note-folders/{folder_id}/archive", response_model=NoteFolderResponse)
+async def archive_note_folder(
+    folder_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Archive a note folder along with all notes currently inside it"""
+    if not note_service.archive_note_folder(db, folder_id, current_user.id):
+        raise HTTPException(status_code=404, detail="Note folder not found")
+    updated = db.query(NoteFolder).filter(NoteFolder.id == folder_id, NoteFolder.user_id == current_user.id).first()
+    return NoteFolderResponse.model_validate(updated)
+
+@app.post("/note-folders/{folder_id}/restore", response_model=NoteFolderResponse)
+async def restore_note_folder(
+    folder_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Restore an archived note folder"""
+    if not note_service.restore_note_folder(db, folder_id, current_user.id):
+        raise HTTPException(status_code=404, detail="Note folder not found")
+    updated = db.query(NoteFolder).filter(NoteFolder.id == folder_id, NoteFolder.user_id == current_user.id).first()
+    return NoteFolderResponse.model_validate(updated)
+
 @app.put("/notes-sidebar/order")
 async def update_notes_sidebar_order(
     order: NotesSidebarOrder,
@@ -270,6 +334,38 @@ async def list_notes(
 ):
     """Get all notes for the current user"""
     return [NoteResponse.model_validate(n) for n in note_service.list_notes(db, current_user.id)]
+
+@app.get("/notes/archived", response_model=List[NoteResponse])
+async def list_archived_notes(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get all archived notes for the current user"""
+    return [NoteResponse.model_validate(n) for n in note_service.list_archived_notes(db, current_user.id)]
+
+@app.post("/notes/{note_id}/archive", response_model=NoteResponse)
+async def archive_note(
+    note_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Archive a note instead of deleting it"""
+    if not note_service.archive_note(db, note_id, current_user.id):
+        raise HTTPException(status_code=404, detail="Note not found")
+    updated = note_service.get_note(db, note_id, current_user.id)
+    return NoteResponse.model_validate(updated)
+
+@app.post("/notes/{note_id}/restore", response_model=NoteResponse)
+async def restore_note(
+    note_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Restore an archived note"""
+    if not note_service.restore_note(db, note_id, current_user.id):
+        raise HTTPException(status_code=404, detail="Note not found")
+    updated = note_service.get_note(db, note_id, current_user.id)
+    return NoteResponse.model_validate(updated)
 
 @app.get("/notes/{note_id}", response_model=NoteWithTexts)
 async def get_note(
@@ -503,6 +599,39 @@ async def list_conversations(
     """Get all conversations for the current user"""
     conversations = conversation_service.list_conversations(db, current_user.id)
     return [ConversationResponse.model_validate(conv) for conv in conversations]
+
+@app.get("/conversations/archived", response_model=List[ConversationResponse])
+async def list_archived_conversations(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get all archived conversations for the current user"""
+    conversations = conversation_service.list_archived_conversations(db, current_user.id)
+    return [ConversationResponse.model_validate(conv) for conv in conversations]
+
+@app.post("/conversations/{conversation_id}/archive", response_model=ConversationResponse)
+async def archive_conversation(
+    conversation_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Archive a conversation instead of deleting it"""
+    if not conversation_service.archive_conversation(db, conversation_id, current_user.id):
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    updated = conversation_service.get_conversation(db, conversation_id, current_user.id)
+    return ConversationResponse.model_validate(updated)
+
+@app.post("/conversations/{conversation_id}/restore", response_model=ConversationResponse)
+async def restore_conversation(
+    conversation_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Restore an archived conversation"""
+    if not conversation_service.restore_conversation(db, conversation_id, current_user.id):
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    updated = conversation_service.get_conversation(db, conversation_id, current_user.id)
+    return ConversationResponse.model_validate(updated)
 
 @app.patch("/conversations/{conversation_id}/organize", response_model=ConversationResponse)
 async def organize_conversation(

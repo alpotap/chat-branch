@@ -23,6 +23,14 @@ SCHEMA_UPGRADES = [
     "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS folder_id VARCHAR(36);",
     "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS color VARCHAR(7);",
     "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS position INTEGER DEFAULT 0;",
+    "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS is_archived BOOLEAN DEFAULT false;",
+    "ALTER TABLE conversations ADD COLUMN IF NOT EXISTS archived_at TIMESTAMP;",
+    "ALTER TABLE folders ADD COLUMN IF NOT EXISTS is_archived BOOLEAN DEFAULT false;",
+    "ALTER TABLE folders ADD COLUMN IF NOT EXISTS archived_at TIMESTAMP;",
+    "ALTER TABLE notes ADD COLUMN IF NOT EXISTS is_archived BOOLEAN DEFAULT false;",
+    "ALTER TABLE notes ADD COLUMN IF NOT EXISTS archived_at TIMESTAMP;",
+    "ALTER TABLE note_folders ADD COLUMN IF NOT EXISTS is_archived BOOLEAN DEFAULT false;",
+    "ALTER TABLE note_folders ADD COLUMN IF NOT EXISTS archived_at TIMESTAMP;",
 ]
 
 def apply_schema_upgrades():

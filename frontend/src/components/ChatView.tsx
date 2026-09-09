@@ -91,9 +91,18 @@ const ChatView = memo(({
 
   // Land on the latest message when the branch or message set changes (e.g. after a tree node click)
   useEffect(() => {
-    scrollToBottom();
+    const selectedElement = selectedMessage
+      ? Array.from(messagesRef.current?.querySelectorAll<HTMLElement>('[data-message-id]') || [])
+          .find(element => element.dataset.messageId === selectedMessage)
+      : null;
+
+    if (selectedElement) {
+      selectedElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    } else {
+      scrollToBottom();
+    }
     handleScroll();
-  }, [currentBranch, paginatedMessages.length, pendingUserMessage, showAITyping, scrollToBottom, handleScroll]);
+  }, [currentBranch, paginatedMessages.length, pendingUserMessage, showAITyping, selectedMessage, scrollToBottom, handleScroll]);
 
   const startBranchRename = () => {
     setIsRenamingBranch(true);

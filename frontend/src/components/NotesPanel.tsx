@@ -12,6 +12,7 @@ interface NotesPanelProps {
   onDeleteText: (textId: string) => void;
   onReorderTexts: (items: { id: string; position: number }[]) => void;
   onNavigateToSource: (conversationId: string, messageId: string, branchName?: string | null) => void;
+  onRestoreNote?: (noteId: string) => void;
 }
 
 // Reuses the same drag-and-drop pattern as ConversationSidebar for persisted reordering.
@@ -22,7 +23,8 @@ const NotesPanel: React.FC<NotesPanelProps> = ({
   onEditText,
   onDeleteText,
   onReorderTexts,
-  onNavigateToSource
+  onNavigateToSource,
+  onRestoreNote
 }) => {
   const [editorState, setEditorState] = useState<null | { textId?: string; initialContent: string }>(null);
   const [dragId, setDragId] = useState<string | null>(null);
@@ -72,10 +74,16 @@ const NotesPanel: React.FC<NotesPanelProps> = ({
         <div className="notes-panel-breadcrumb">
           {folderName && <span className="notes-panel-folder">📁 {folderName} /</span>}
           <span className="notes-panel-title">{note.title}</span>
+          {note.is_archived && <span className="archive-badge">Archived</span>}
         </div>
-        <button className="new-conversation-btn" onClick={() => setEditorState({ initialContent: '' })}>
-          + Add text
-        </button>
+        <div className="notes-panel-header-actions">
+          {note.is_archived && onRestoreNote && (
+            <button className="new-conversation-btn" onClick={() => onRestoreNote(note.id)}>↩️ Restore</button>
+          )}
+          <button className="new-conversation-btn" onClick={() => setEditorState({ initialContent: '' })}>
+            + Add text
+          </button>
+        </div>
       </div>
 
       <div className="notes-panel-body">

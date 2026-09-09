@@ -7,6 +7,8 @@ interface Conversation {
   folder_id?: string | null;
   color?: string | null;
   position?: number;
+  is_archived?: boolean;
+  archived_at?: string | null;
 }
 
 interface Folder {
@@ -15,19 +17,27 @@ interface Folder {
   color: string;
   position: number;
   created_at: string;
+  is_archived?: boolean;
+  archived_at?: string | null;
 }
 
 interface ConversationSidebarProps {
   conversations: Conversation[];
   folders: Folder[];
+  archivedConversations?: Conversation[];
+  archivedFolders?: Folder[];
   currentConversation: Conversation | null;
   onLoadConversation: (id: string) => void;
   onCreateConversation: (title?: string) => void;
   onRenameConversation: (id: string, newTitle: string) => void;
   onDeleteConversation: (id: string) => void;
+  onArchiveConversation?: (id: string) => void;
+  onRestoreConversation?: (id: string) => void;
   onCreateFolder: (name: string, color?: string) => void;
   onUpdateFolder: (folderId: string, changes: { name?: string; color?: string }) => void;
   onDeleteFolder: (folderId: string) => void;
+  onArchiveFolder?: (folderId: string) => void;
+  onRestoreFolder?: (folderId: string) => void;
   onRecolorConversation: (conversationId: string, color: string) => void;
   onReorder: (
     folders: { id: string; position: number }[],
@@ -48,14 +58,20 @@ type DragItem = { type: 'conversation' | 'folder'; id: string } | null;
 const ConversationSidebar = memo(({ 
   conversations, 
   folders,
+  archivedConversations = [],
+  archivedFolders = [],
   currentConversation, 
   onLoadConversation, 
   onCreateConversation,
   onRenameConversation,
   onDeleteConversation,
+  onArchiveConversation,
+  onRestoreConversation,
   onCreateFolder,
   onUpdateFolder,
   onDeleteFolder,
+  onArchiveFolder,
+  onRestoreFolder,
   onRecolorConversation,
   onReorder,
   headerLabel = 'Chats',
@@ -71,6 +87,10 @@ const ConversationSidebar = memo(({
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [conversationToDelete, setConversationToDelete] = useState<Conversation | null>(null);
   const [folderToDelete, setFolderToDelete] = useState<Folder | null>(null);
+  const [archiveExpanded, setArchiveExpanded] = useState<boolean>(
+    () => localStorage.getItem(`chatbranch-archive-expanded-${headerLabel}`) === 'true'
+  );
+  const [permanentDeleteTarget, setPermanentDeleteTarget] = useState<{ type: 'conversation' | 'folder'; id: string; title: string } | null>(null);
   const [collapsed, setCollapsed] = useState<boolean>(() => localStorage.getItem('chatbranch-sidebar-collapsed') === 'true');
   const [width, setWidth] = useState<number>(() => Number(localStorage.getItem('chatbranch-sidebar-width')) || 210);
   const [collapsedFolders, setCollapsedFolders] = useState<string[]>(() => {
@@ -95,6 +115,10 @@ const ConversationSidebar = memo(({
   useEffect(() => {
     localStorage.setItem('chatbranch-collapsed-folders', JSON.stringify(collapsedFolders));
   }, [collapsedFolders]);
+
+  useEffect(() => {
+    localStorage.setItem(`chatbranch-archive-expanded-${headerLabel}`, String(archiveExpanded));
+  }, [archiveExpanded, headerLabel]);
 
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
@@ -127,6 +151,12 @@ const ConversationSidebar = memo(({
   const rootConversations = conversations.filter(c => !c.folder_id).sort(sortByPosition);
   const folderConversations = (folderId: string) =>
     conversations.filter(c => c.folder_id === folderId).sort(sortByPosition);
+
+  type ArchivedEntry = { type: 'folder'; data: Folder } | { type: 'conversation'; data: Conversation };
+  const archivedItems: ArchivedEntry[] = [
+    ...archivedFolders.map(f => ({ type: 'folder' as const, data: f })),
+    ...archivedConversations.map(c => ({ type: 'conversation' as const, data: c })),
+  ].sort((a, b) => new Date(b.data.archived_at || 0).getTime() - new Date(a.data.archived_at || 0).getTime());
 
   const handleCreateConversation = () => {
     if (newConversationTitle.trim()) {
@@ -161,7 +191,19 @@ const ConversationSidebar = memo(({
     setShowDeleteModal(true);
   };
 
-  const confirmDelete = () => {
+  const confirmArchive = () => {
+    if (conversationToDelete) {
+      (onArchiveConversation || onDeleteConversation)(conversationToDelete.id);
+    }
+    if (folderToDelete) {
+      (onArchiveFolder || onDeleteFolder)(folderToDelete.id);
+    }
+    setShowDeleteModal(false);
+    setConversationToDelete(null);
+    setFolderToDelete(null);
+  };
+
+  const confirmDeletePermanently = () => {
     if (conversationToDelete) {
       onDeleteConversation(conversationToDelete.id);
     }
@@ -177,6 +219,16 @@ const ConversationSidebar = memo(({
     setShowDeleteModal(false);
     setConversationToDelete(null);
     setFolderToDelete(null);
+  };
+
+  const confirmPermanentDeleteFromArchive = () => {
+    if (!permanentDeleteTarget) return;
+    if (permanentDeleteTarget.type === 'conversation') {
+      onDeleteConversation(permanentDeleteTarget.id);
+    } else {
+      onDeleteFolder(permanentDeleteTarget.id);
+    }
+    setPermanentDeleteTarget(null);
   };
 
   const toggleFolder = (folderId: string) => {
@@ -409,7 +461,7 @@ const ConversationSidebar = memo(({
                     </button>
                     <button
                       className="delete-btn"
-                      title="Delete folder (conversations are kept)"
+                      title="Archive or delete folder"
                       onClick={() => { setFolderToDelete(folder); setShowDeleteModal(true); }}
                     >
                       🗑️
@@ -425,6 +477,75 @@ const ConversationSidebar = memo(({
             ))}
 
             {rootConversations.map(renderConversation)}
+          </div>
+        )}
+
+        {!collapsed && (
+          <div className="sidebar-archive">
+            <button
+              className="sidebar-archive-header"
+              onClick={() => setArchiveExpanded(e => !e)}
+              title="Archived items"
+            >
+              {archiveExpanded ? '▾' : '▸'} 🗄️ Archive ({archivedItems.length})
+            </button>
+            {archiveExpanded && (
+              <div className="sidebar-archive-body">
+                {archivedItems.length === 0 && (
+                  <div className="archive-item-title" style={{ padding: '0.2rem 0.3rem' }}>Nothing archived yet</div>
+                )}
+                {archivedItems.map(entry => entry.type === 'folder' ? (
+                  <div key={`archived-folder-${entry.data.id}`} className="archive-item">
+                    <span className="archive-item-title">📁 {entry.data.name}</span>
+                    <div className="archive-item-actions">
+                      <button
+                        className="rename-btn"
+                        title="Restore folder"
+                        onClick={() => onRestoreFolder && onRestoreFolder(entry.data.id)}
+                      >
+                        ↩️
+                      </button>
+                      <button
+                        className="delete-btn"
+                        title="Delete permanently"
+                        onClick={() => setPermanentDeleteTarget({ type: 'folder', id: entry.data.id, title: entry.data.name })}
+                      >
+                        🗑️
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div
+                    key={`archived-conversation-${entry.data.id}`}
+                    className={`archive-item ${currentConversation?.id === entry.data.id ? 'active' : ''}`}
+                  >
+                    <span
+                      className="archive-item-title archive-item-open"
+                      onClick={() => onLoadConversation(entry.data.id)}
+                      title={`Open this archived ${itemNounSingular.toLowerCase()}`}
+                    >
+                      {entry.data.title}
+                    </span>
+                    <div className="archive-item-actions">
+                      <button
+                        className="rename-btn"
+                        title={`Restore ${itemNounSingular.toLowerCase()}`}
+                        onClick={() => onRestoreConversation && onRestoreConversation(entry.data.id)}
+                      >
+                        ↩️
+                      </button>
+                      <button
+                        className="delete-btn"
+                        title="Delete permanently"
+                        onClick={() => setPermanentDeleteTarget({ type: 'conversation', id: entry.data.id, title: entry.data.title })}
+                      >
+                        🗑️
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -458,12 +579,26 @@ const ConversationSidebar = memo(({
             <h3>{folderToDelete ? 'Delete Folder' : `Delete ${itemNounSingular}`}</h3>
             <p>
               {folderToDelete
-                ? `Delete folder "${folderToDelete.name}"? Its ${itemNounSingular.toLowerCase()}s move back to the root.`
-                : `Delete "${conversationToDelete?.title}"? This cannot be undone.`}
+                ? `Archive or permanently delete folder "${folderToDelete.name}"? Its ${itemNounSingular.toLowerCase()}s go with it.`
+                : `Archive or permanently delete "${conversationToDelete?.title}"?`}
             </p>
             <div className="modal-buttons">
-              <button className="confirm-btn" onClick={confirmDelete}>Delete</button>
+              <button className="archive-btn" onClick={confirmArchive} autoFocus>🗄️ Archive</button>
+              <button className="delete-permanent-btn" onClick={confirmDeletePermanently}>Delete Permanently</button>
               <button className="cancel-btn" onClick={cancelDelete}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {permanentDeleteTarget && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <h3>Delete Permanently</h3>
+            <p>Permanently delete "{permanentDeleteTarget.title}"? This cannot be undone.</p>
+            <div className="modal-buttons">
+              <button className="delete-permanent-btn" onClick={confirmPermanentDeleteFromArchive} autoFocus>Delete Permanently</button>
+              <button className="cancel-btn" onClick={() => setPermanentDeleteTarget(null)}>Cancel</button>
             </div>
           </div>
         </div>

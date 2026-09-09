@@ -196,6 +196,7 @@ const MessageBubble = memo<MessageBubbleProps>(({
     <>
       <div 
         className={`message-bubble ${message.role} ${isSelected ? 'selected' : ''} ${message.is_summary ? 'summary' : ''}`}
+        data-message-id={message.id}
         style={{ 
           marginLeft: `${depth * 20}px`,
           borderLeft: `4px solid ${getBranchColor(message.branch_name)}`

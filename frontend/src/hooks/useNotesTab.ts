@@ -18,12 +18,17 @@ export const useNotesTab = () => {
   }, [sidebarTab]);
 
   const notesApi = useNotes();
-  const { loadNoteFolders, loadNotes, createNote, loadNote, renameNote, deleteNote, organizeNote, reorderNotesSidebar } = notesApi;
+  const {
+    loadNoteFolders, loadNotes, createNote, loadNote, renameNote, deleteNote, organizeNote, reorderNotesSidebar,
+    loadArchivedNotes, loadArchivedNoteFolders, archiveNote, restoreNote, archiveNoteFolder, restoreNoteFolder
+  } = notesApi;
 
   useEffect(() => {
     loadNoteFolders();
     loadNotes();
-  }, [loadNoteFolders, loadNotes]);
+    loadArchivedNotes();
+    loadArchivedNoteFolders();
+  }, [loadNoteFolders, loadNotes, loadArchivedNotes, loadArchivedNoteFolders]);
 
   const handleSelectNote = useCallback(async (noteId: string) => {
     await loadNote(noteId);
@@ -43,6 +48,22 @@ export const useNotesTab = () => {
     await deleteNote(id);
   }, [deleteNote]);
 
+  const handleArchiveNote = useCallback(async (id: string) => {
+    await archiveNote(id);
+  }, [archiveNote]);
+
+  const handleRestoreNote = useCallback(async (id: string) => {
+    await restoreNote(id);
+  }, [restoreNote]);
+
+  const handleArchiveNoteFolder = useCallback(async (id: string) => {
+    await archiveNoteFolder(id);
+  }, [archiveNoteFolder]);
+
+  const handleRestoreNoteFolder = useCallback(async (id: string) => {
+    await restoreNoteFolder(id);
+  }, [restoreNoteFolder]);
+
   const handleRecolorNote = useCallback((id: string, color: string) => {
     organizeNote(id, { color });
   }, [organizeNote]);
@@ -55,6 +76,10 @@ export const useNotesTab = () => {
     handleCreateNote,
     handleRenameNote,
     handleDeleteNote,
+    handleArchiveNote,
+    handleRestoreNote,
+    handleArchiveNoteFolder,
+    handleRestoreNoteFolder,
     handleRecolorNote,
     reorderNotesSidebar
   };

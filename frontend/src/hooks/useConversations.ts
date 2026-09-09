@@ -8,6 +8,8 @@ interface Conversation {
   folder_id?: string | null;
   color?: string | null;
   position?: number;
+  is_archived?: boolean;
+  archived_at?: string | null;
 }
 
 export interface Folder {
@@ -16,6 +18,8 @@ export interface Folder {
   color: string;
   position: number;
   created_at: string;
+  is_archived?: boolean;
+  archived_at?: string | null;
 }
 
 interface Message {
@@ -41,6 +45,8 @@ const API_BASE = process.env.REACT_APP_API_BASE;
 export const useConversations = () => {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
+  const [archivedConversations, setArchivedConversations] = useState<Conversation[]>([]);
+  const [archivedFolders, setArchivedFolders] = useState<Folder[]>([]);
   const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null);
   const [conversationTree, setConversationTree] = useState<ConversationTree | null>(null);
 
@@ -83,6 +89,40 @@ export const useConversations = () => {
       return true;
     } catch (error) {
       console.error('Error deleting folder:', error);
+      return false;
+    }
+  }, []);
+
+  const loadArchivedFolders = useCallback(async () => {
+    try {
+      const response = await axios.get(`${API_BASE}/folders/archived`);
+      setArchivedFolders(response.data);
+    } catch (error) {
+      console.error('Error loading archived folders:', error);
+    }
+  }, []);
+
+  const archiveFolder = useCallback(async (folderId: string) => {
+    try {
+      const response = await axios.post(`${API_BASE}/folders/${folderId}/archive`);
+      setFolders(prev => prev.filter(f => f.id !== folderId));
+      setArchivedFolders(prev => [response.data, ...prev]);
+      setConversations(prev => prev.filter(c => c.folder_id !== folderId));
+      return true;
+    } catch (error) {
+      console.error('Error archiving folder:', error);
+      return false;
+    }
+  }, []);
+
+  const restoreFolder = useCallback(async (folderId: string) => {
+    try {
+      const response = await axios.post(`${API_BASE}/folders/${folderId}/restore`);
+      setArchivedFolders(prev => prev.filter(f => f.id !== folderId));
+      setFolders(prev => [...prev, response.data]);
+      return true;
+    } catch (error) {
+      console.error('Error restoring folder:', error);
       return false;
     }
   }, []);
@@ -211,6 +251,41 @@ export const useConversations = () => {
     }
   }, []);
 
+  const loadArchivedConversations = useCallback(async () => {
+    try {
+      const response = await axios.get(`${API_BASE}/conversations/archived`);
+      setArchivedConversations(response.data);
+    } catch (error) {
+      console.error('Error loading archived conversations:', error);
+    }
+  }, []);
+
+  const archiveConversation = useCallback(async (conversationId: string) => {
+    try {
+      const response = await axios.post(`${API_BASE}/conversations/${conversationId}/archive`);
+      setConversations(prev => prev.filter(conv => conv.id !== conversationId));
+      setArchivedConversations(prev => [response.data, ...prev]);
+      setCurrentConversation(null);
+      setConversationTree(null);
+      return true;
+    } catch (error) {
+      console.error('Error archiving conversation:', error);
+      return false;
+    }
+  }, []);
+
+  const restoreConversation = useCallback(async (conversationId: string) => {
+    try {
+      const response = await axios.post(`${API_BASE}/conversations/${conversationId}/restore`);
+      setArchivedConversations(prev => prev.filter(conv => conv.id !== conversationId));
+      setConversations(prev => [...prev, response.data]);
+      return true;
+    } catch (error) {
+      console.error('Error restoring conversation:', error);
+      return false;
+    }
+  }, []);
+
   const deleteBranch = useCallback(async (conversationId: string, branchName: string) => {
     try {
       await axios.delete(`${API_BASE}/conversations/${conversationId}/branches/${encodeURIComponent(branchName)}`);
@@ -228,6 +303,8 @@ export const useConversations = () => {
   return {
     conversations,
     folders,
+    archivedConversations,
+    archivedFolders,
     currentConversation,
     conversationTree,
     loadConversations,
@@ -235,11 +312,17 @@ export const useConversations = () => {
     createFolder,
     updateFolder,
     deleteFolder,
+    loadArchivedFolders,
+    archiveFolder,
+    restoreFolder,
     organizeConversation,
     saveSidebarOrder,
     loadConversation,
     createConversation,
     deleteConversation,
+    loadArchivedConversations,
+    archiveConversation,
+    restoreConversation,
     renameConversation,
     renameBranch,
     setCurrentConversation,

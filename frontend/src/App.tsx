@@ -88,6 +88,8 @@ const ConversationApp: React.FC = () => {
   const {
     conversations,
     folders,
+    archivedConversations,
+    archivedFolders,
     currentConversation,
     conversationTree,
     loadConversations,
@@ -95,11 +97,17 @@ const ConversationApp: React.FC = () => {
     createFolder,
     updateFolder,
     deleteFolder,
+    loadArchivedFolders,
+    archiveFolder,
+    restoreFolder,
     organizeConversation,
     saveSidebarOrder,
     loadConversation,
     createConversation,
     deleteConversation,
+    loadArchivedConversations,
+    archiveConversation,
+    restoreConversation,
     renameConversation,
     renameBranch,
     deleteBranch,
@@ -122,11 +130,17 @@ const ConversationApp: React.FC = () => {
     setSidebarTab,
     noteFolders,
     notes,
+    archivedNoteFolders,
+    archivedNotes,
     currentNote,
     handleSelectNote,
     handleCreateNote,
     handleRenameNote,
     handleDeleteNote,
+    handleArchiveNote,
+    handleRestoreNote,
+    handleArchiveNoteFolder,
+    handleRestoreNoteFolder,
     handleRecolorNote,
     createNoteFolder,
     updateNoteFolder,
@@ -334,7 +348,9 @@ const ConversationApp: React.FC = () => {
   useEffect(() => {
     loadConversations();
     loadFolders();
-  }, [loadConversations, loadFolders]);
+    loadArchivedConversations();
+    loadArchivedFolders();
+  }, [loadConversations, loadFolders, loadArchivedConversations, loadArchivedFolders]);
 
   // Initialize debug mode from URL params
   useEffect(() => {
@@ -661,6 +677,7 @@ const ConversationApp: React.FC = () => {
   const handleNavigateToSource = useCallback((sourceConversationId: string, messageId: string, branchName?: string | null) => {
     setSidebarTab('chats');
     if (currentConversation?.id === sourceConversationId) {
+      setShowAllMessages(true);
       setCurrentBranch(branchName || 'main');
       handleMessageSelect(messageId);
     } else {
@@ -679,6 +696,7 @@ const ConversationApp: React.FC = () => {
 
     setSidebarTab('chats');
     if (result.conversation_id === currentConversation?.id && result.message_id) {
+      setShowAllMessages(true);
       setCurrentBranch(result.branch_name || 'main');
       setViewMode('chat');
       handleMessageSelect(result.message_id);
@@ -703,6 +721,7 @@ const ConversationApp: React.FC = () => {
     try {
       const pending = JSON.parse(navigationRaw);
       if (pending.conversationId === currentConversation.id) {
+        setShowAllMessages(true);
         setCurrentBranch(pending.branchName || 'main');
         if (pending.messageId) {
           setViewMode('chat');
@@ -1085,14 +1104,20 @@ const ConversationApp: React.FC = () => {
             <ConversationSidebar
               conversations={conversations}
               folders={folders}
+              archivedConversations={archivedConversations}
+              archivedFolders={archivedFolders}
               currentConversation={currentConversation}
               onLoadConversation={handleLoadConversation}
               onCreateConversation={handleCreateConversation}
               onRenameConversation={handleRenameConversation}
               onDeleteConversation={handleDeleteConversation}
+              onArchiveConversation={archiveConversation}
+              onRestoreConversation={restoreConversation}
               onCreateFolder={createFolder}
               onUpdateFolder={updateFolder}
               onDeleteFolder={deleteFolder}
+              onArchiveFolder={archiveFolder}
+              onRestoreFolder={restoreFolder}
               onRecolorConversation={(id, color) => organizeConversation(id, { color })}
               onReorder={saveSidebarOrder}
             />
@@ -1100,14 +1125,20 @@ const ConversationApp: React.FC = () => {
             <ConversationSidebar
               conversations={notes}
               folders={noteFolders}
+              archivedConversations={archivedNotes}
+              archivedFolders={archivedNoteFolders}
               currentConversation={currentNote}
               onLoadConversation={handleSelectNote}
               onCreateConversation={handleCreateNote}
               onRenameConversation={handleRenameNote}
               onDeleteConversation={handleDeleteNote}
+              onArchiveConversation={handleArchiveNote}
+              onRestoreConversation={handleRestoreNote}
               onCreateFolder={createNoteFolder}
               onUpdateFolder={updateNoteFolder}
               onDeleteFolder={deleteNoteFolder}
+              onArchiveFolder={handleArchiveNoteFolder}
+              onRestoreFolder={handleRestoreNoteFolder}
               onRecolorConversation={handleRecolorNote}
               onReorder={reorderNotesSidebar}
               headerLabel="Notes"
@@ -1127,9 +1158,16 @@ const ConversationApp: React.FC = () => {
               onDeleteText={(textId) => currentNote && deleteNoteText(currentNote.id, textId)}
               onReorderTexts={(items) => currentNote && reorderNoteTexts(currentNote.id, items)}
               onNavigateToSource={handleNavigateToSource}
+              onRestoreNote={handleRestoreNote}
             />
           ) : currentConversation ? (
             <>
+              {currentConversation.is_archived && (
+                <div className="archived-banner">
+                  🗄️ This chat is archived
+                  <button onClick={() => restoreConversation(currentConversation.id)}>↩️ Restore</button>
+                </div>
+              )}
               {viewMode === 'tree' && conversationTree ? (
                 <div className="tree-container">
                   <TreeView
@@ -1348,17 +1386,23 @@ const ConversationApp: React.FC = () => {
 // Home component for conversation list
 const Home: React.FC = () => {
   const navigate = useNavigate();
-  const { conversations, folders, loadConversations, loadFolders, createConversation, deleteConversation, renameConversation, createFolder, updateFolder, deleteFolder, organizeConversation, saveSidebarOrder } = useConversations();
+  const { conversations, folders, archivedConversations, archivedFolders, loadConversations, loadFolders, createConversation, deleteConversation, renameConversation, createFolder, updateFolder, deleteFolder, loadArchivedFolders, archiveFolder, restoreFolder, organizeConversation, saveSidebarOrder, loadArchivedConversations, archiveConversation, restoreConversation } = useConversations();
   const {
     sidebarTab,
     setSidebarTab,
     noteFolders,
     notes,
+    archivedNoteFolders,
+    archivedNotes,
     currentNote,
     handleSelectNote,
     handleCreateNote,
     handleRenameNote,
     handleDeleteNote,
+    handleArchiveNote,
+    handleRestoreNote,
+    handleArchiveNoteFolder,
+    handleRestoreNoteFolder,
     handleRecolorNote,
     createNoteFolder,
     updateNoteFolder,
@@ -1406,7 +1450,9 @@ const Home: React.FC = () => {
   useEffect(() => {
     loadConversations();
     loadFolders();
-  }, [loadConversations, loadFolders]);
+    loadArchivedConversations();
+    loadArchivedFolders();
+  }, [loadConversations, loadFolders, loadArchivedConversations, loadArchivedFolders]);
 
   const handleLoadConversation = useCallback(async (conversationId: string) => {
     navigate(`/conversation/${conversationId}`);
@@ -1477,14 +1523,20 @@ const Home: React.FC = () => {
             <ConversationSidebar
               conversations={conversations}
               folders={folders}
+              archivedConversations={archivedConversations}
+              archivedFolders={archivedFolders}
               currentConversation={null}
               onLoadConversation={handleLoadConversation}
               onCreateConversation={handleCreateConversation}
               onRenameConversation={handleRenameConversation}
               onDeleteConversation={handleDeleteConversation}
+              onArchiveConversation={archiveConversation}
+              onRestoreConversation={restoreConversation}
               onCreateFolder={createFolder}
               onUpdateFolder={updateFolder}
               onDeleteFolder={deleteFolder}
+              onArchiveFolder={archiveFolder}
+              onRestoreFolder={restoreFolder}
               onRecolorConversation={(id, color) => organizeConversation(id, { color })}
               onReorder={saveSidebarOrder}
             />
@@ -1492,14 +1544,20 @@ const Home: React.FC = () => {
             <ConversationSidebar
               conversations={notes}
               folders={noteFolders}
+              archivedConversations={archivedNotes}
+              archivedFolders={archivedNoteFolders}
               currentConversation={currentNote}
               onLoadConversation={handleSelectNote}
               onCreateConversation={handleCreateNote}
               onRenameConversation={handleRenameNote}
               onDeleteConversation={handleDeleteNote}
+              onArchiveConversation={handleArchiveNote}
+              onRestoreConversation={handleRestoreNote}
               onCreateFolder={createNoteFolder}
               onUpdateFolder={updateNoteFolder}
               onDeleteFolder={deleteNoteFolder}
+              onArchiveFolder={handleArchiveNoteFolder}
+              onRestoreFolder={handleRestoreNoteFolder}
               onRecolorConversation={handleRecolorNote}
               onReorder={reorderNotesSidebar}
               headerLabel="Notes"
@@ -1518,6 +1576,7 @@ const Home: React.FC = () => {
               onDeleteText={(textId) => currentNote && deleteNoteText(currentNote.id, textId)}
               onReorderTexts={(items) => currentNote && reorderNoteTexts(currentNote.id, items)}
               onNavigateToSource={handleNavigateToSource}
+              onRestoreNote={handleRestoreNote}
             />
           ) : (
             <EmptyState onCreateConversation={handleCreateConversation} />

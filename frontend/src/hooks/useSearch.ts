@@ -12,6 +12,7 @@ export interface SearchResult {
   conversation_title?: string | null;
   message_id?: string | null;
   branch_name?: string | null;
+  is_archived?: boolean;
 }
 
 const API_BASE = process.env.REACT_APP_API_BASE || '/api';

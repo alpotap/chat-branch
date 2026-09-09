@@ -31,6 +31,8 @@ class Conversation(Base):
     folder_id = Column(String(36), ForeignKey("folders.id"), nullable=True)
     color = Column(String(7), nullable=True)
     position = Column(Integer, default=0)
+    is_archived = Column(Boolean, default=False, nullable=False)
+    archived_at = Column(DateTime, nullable=True)
     
     # Relationships
     user = relationship("User", back_populates="conversations")
@@ -46,6 +48,8 @@ class Folder(Base):
     color = Column(String(7), default="#667eea")
     position = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
+    is_archived = Column(Boolean, default=False, nullable=False)
+    archived_at = Column(DateTime, nullable=True)
 
     user = relationship("User")
 
@@ -97,6 +101,8 @@ class NoteFolder(Base):
     color = Column(String(7), default="#667eea")
     position = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
+    is_archived = Column(Boolean, default=False, nullable=False)
+    archived_at = Column(DateTime, nullable=True)
 
     user = relationship("User")
 
@@ -111,6 +117,8 @@ class Note(Base):
     position = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    is_archived = Column(Boolean, default=False, nullable=False)
+    archived_at = Column(DateTime, nullable=True)
 
     user = relationship("User")
     texts = relationship("NoteText", back_populates="note", cascade="all, delete-orphan")

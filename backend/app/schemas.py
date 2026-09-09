@@ -15,6 +15,8 @@ class ConversationResponse(BaseModel):
     folder_id: Optional[str] = None
     color: Optional[str] = None
     position: int = 0
+    is_archived: bool = False
+    archived_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -40,6 +42,8 @@ class FolderResponse(BaseModel):
     color: str
     position: int = 0
     created_at: datetime
+    is_archived: bool = False
+    archived_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -205,6 +209,8 @@ class NoteFolderResponse(BaseModel):
     color: str
     position: int = 0
     created_at: datetime
+    is_archived: bool = False
+    archived_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -226,6 +232,8 @@ class NoteResponse(BaseModel):
     position: int = 0
     created_at: datetime
     updated_at: datetime
+    is_archived: bool = False
+    archived_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -309,6 +317,7 @@ class SearchResult(BaseModel):
     conversation_title: Optional[str] = None
     message_id: Optional[str] = None
     branch_name: Optional[str] = None
+    is_archived: bool = False
 
     @field_validator(
         'note_id', 'text_id', 'conversation_id', 'message_id',

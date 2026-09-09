@@ -7,6 +7,8 @@ export interface NoteFolder {
   color: string;
   position: number;
   created_at: string;
+  is_archived?: boolean;
+  archived_at?: string | null;
 }
 
 export interface Note {
@@ -17,6 +19,8 @@ export interface Note {
   position: number;
   created_at: string;
   updated_at: string;
+  is_archived?: boolean;
+  archived_at?: string | null;
 }
 
 export interface NoteText {
@@ -42,6 +46,8 @@ const API_BASE = process.env.REACT_APP_API_BASE;
 export const useNotes = () => {
   const [noteFolders, setNoteFolders] = useState<NoteFolder[]>([]);
   const [notes, setNotes] = useState<Note[]>([]);
+  const [archivedNoteFolders, setArchivedNoteFolders] = useState<NoteFolder[]>([]);
+  const [archivedNotes, setArchivedNotes] = useState<Note[]>([]);
   const [currentNote, setCurrentNote] = useState<NoteWithTexts | null>(null);
 
   const loadNoteFolders = useCallback(async () => {
@@ -83,6 +89,40 @@ export const useNotes = () => {
       return true;
     } catch (error) {
       console.error('Error deleting note folder:', error);
+      return false;
+    }
+  }, []);
+
+  const loadArchivedNoteFolders = useCallback(async () => {
+    try {
+      const response = await axios.get(`${API_BASE}/note-folders/archived`);
+      setArchivedNoteFolders(response.data);
+    } catch (error) {
+      console.error('Error loading archived note folders:', error);
+    }
+  }, []);
+
+  const archiveNoteFolder = useCallback(async (folderId: string) => {
+    try {
+      const response = await axios.post(`${API_BASE}/note-folders/${folderId}/archive`);
+      setNoteFolders(prev => prev.filter(f => f.id !== folderId));
+      setArchivedNoteFolders(prev => [response.data, ...prev]);
+      setNotes(prev => prev.filter(n => n.folder_id !== folderId));
+      return true;
+    } catch (error) {
+      console.error('Error archiving note folder:', error);
+      return false;
+    }
+  }, []);
+
+  const restoreNoteFolder = useCallback(async (folderId: string) => {
+    try {
+      const response = await axios.post(`${API_BASE}/note-folders/${folderId}/restore`);
+      setArchivedNoteFolders(prev => prev.filter(f => f.id !== folderId));
+      setNoteFolders(prev => [...prev, response.data]);
+      return true;
+    } catch (error) {
+      console.error('Error restoring note folder:', error);
       return false;
     }
   }, []);
@@ -180,6 +220,40 @@ export const useNotes = () => {
     }
   }, []);
 
+  const loadArchivedNotes = useCallback(async () => {
+    try {
+      const response = await axios.get(`${API_BASE}/notes/archived`);
+      setArchivedNotes(response.data);
+    } catch (error) {
+      console.error('Error loading archived notes:', error);
+    }
+  }, []);
+
+  const archiveNote = useCallback(async (noteId: string) => {
+    try {
+      const response = await axios.post(`${API_BASE}/notes/${noteId}/archive`);
+      setNotes(prev => prev.filter(n => n.id !== noteId));
+      setArchivedNotes(prev => [response.data, ...prev]);
+      setCurrentNote(prev => (prev && prev.id === noteId ? null : prev));
+      return true;
+    } catch (error) {
+      console.error('Error archiving note:', error);
+      return false;
+    }
+  }, []);
+
+  const restoreNote = useCallback(async (noteId: string) => {
+    try {
+      const response = await axios.post(`${API_BASE}/notes/${noteId}/restore`);
+      setArchivedNotes(prev => prev.filter(n => n.id !== noteId));
+      setNotes(prev => [...prev, response.data]);
+      return true;
+    } catch (error) {
+      console.error('Error restoring note:', error);
+      return false;
+    }
+  }, []);
+
   const createNoteText = useCallback(async (noteId: string, payload: {
     content: string;
     source_type?: 'manual' | 'conversation';
@@ -268,11 +342,16 @@ export const useNotes = () => {
   return {
     noteFolders,
     notes,
+    archivedNoteFolders,
+    archivedNotes,
     currentNote,
     loadNoteFolders,
     createNoteFolder,
     updateNoteFolder,
     deleteNoteFolder,
+    loadArchivedNoteFolders,
+    archiveNoteFolder,
+    restoreNoteFolder,
     organizeNote,
     reorderNotesSidebar,
     loadNotes,
@@ -280,6 +359,9 @@ export const useNotes = () => {
     createNote,
     renameNote,
     deleteNote,
+    loadArchivedNotes,
+    archiveNote,
+    restoreNote,
     createNoteText,
     updateNoteText,
     deleteNoteText,
