@@ -12,6 +12,8 @@ import LoginPage from './components/LoginPage';
 import TextEditorModal from './components/TextEditorModal';
 import NotesPanel from './components/NotesPanel';
 import NoteDestinationPicker from './components/NoteDestinationPicker';
+import GlobalSearch from './components/GlobalSearch';
+import { SearchResult } from './hooks/useSearch';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { useConversations } from './hooks/useConversations';
 import useOptimisticDeletes from './hooks/useOptimisticDeletes';
@@ -667,20 +669,49 @@ const ConversationApp: React.FC = () => {
     }
   }, [currentConversation, setSidebarTab, setCurrentBranch, handleMessageSelect, navigate]);
 
+  const handleSearchResult = useCallback((result: SearchResult) => {
+    if (result.result_type === 'note' && result.note_id) {
+      setSidebarTab('notes');
+      handleSelectNote(result.note_id);
+      return;
+    }
+    if (result.result_type !== 'chat' || !result.conversation_id) return;
+
+    setSidebarTab('chats');
+    if (result.conversation_id === currentConversation?.id && result.message_id) {
+      setCurrentBranch(result.branch_name || 'main');
+      setViewMode('chat');
+      handleMessageSelect(result.message_id);
+      return;
+    }
+
+    localStorage.setItem('chatbranch-pending-search-nav', JSON.stringify({
+      conversationId: result.conversation_id,
+      messageId: result.message_id,
+      branchName: result.branch_name
+    }));
+    navigate(`/conversation/${result.conversation_id}`);
+  }, [currentConversation, handleMessageSelect, handleSelectNote, navigate, setCurrentBranch, setSidebarTab]);
+
   // Apply a pending source-navigation request (set by handleNavigateToSource) once the target conversation has loaded
   useEffect(() => {
     if (!conversationTree || !currentConversation) return;
     const raw = localStorage.getItem('chatbranch-pending-note-nav');
-    if (!raw) return;
+    const searchRaw = localStorage.getItem('chatbranch-pending-search-nav');
+    const navigationRaw = raw || searchRaw;
+    if (!navigationRaw) return;
     try {
-      const pending = JSON.parse(raw);
+      const pending = JSON.parse(navigationRaw);
       if (pending.conversationId === currentConversation.id) {
         setCurrentBranch(pending.branchName || 'main');
-        handleMessageSelect(pending.messageId);
-        localStorage.removeItem('chatbranch-pending-note-nav');
+        if (pending.messageId) {
+          setViewMode('chat');
+          handleMessageSelect(pending.messageId);
+        }
+        localStorage.removeItem(raw ? 'chatbranch-pending-note-nav' : 'chatbranch-pending-search-nav');
       }
     } catch {
-      localStorage.removeItem('chatbranch-pending-note-nav');
+      localStorage.removeItem(raw ? 'chatbranch-pending-note-nav' : 'chatbranch-pending-search-nav');
     }
   }, [conversationTree, currentConversation, handleMessageSelect]);
 
@@ -916,6 +947,11 @@ const ConversationApp: React.FC = () => {
     });
   }, [currentConversation]);
 
+  const handleSaveEditorSelectionToNote = useCallback((selectedText: string) => {
+    if (!editingMessage) return;
+    handleSaveSelectionToNote(selectedText, editingMessage);
+  }, [editingMessage, handleSaveSelectionToNote]);
+
   const summarizeRequestBody = useCallback(() => resolveModelRequestFields(selectedModel), [selectedModel]);
 
   const handleSummarizeMessage = useCallback(async (messageId: string) => {
@@ -1036,6 +1072,7 @@ const ConversationApp: React.FC = () => {
         canGoForward={undoRedoState.canRedo}
         onGoForward={redo}
         hasMessages={allBranchMessages.length > 0}
+        searchSlot={<GlobalSearch onSelectResult={handleSearchResult} />}
       />
 
       <div className="main-container">
@@ -1171,6 +1208,7 @@ const ConversationApp: React.FC = () => {
           initialContent={editingMessage.content}
           modalRef={editModalRef}
           onCancel={() => setEditingMessage(null)}
+          onSaveSelectionToNote={handleSaveEditorSelectionToNote}
           actions={[
             ...(editingMessage.role === 'assistant' ? [{
               label: '💾 Save Response (updates context)',
@@ -1337,6 +1375,23 @@ const Home: React.FC = () => {
     localStorage.setItem('chatbranch-pending-note-nav', JSON.stringify({ conversationId: sourceConversationId, messageId, branchName }));
     navigate(`/conversation/${sourceConversationId}`);
   }, [setSidebarTab, navigate]);
+
+  const handleSearchResult = useCallback((result: SearchResult) => {
+    if (result.result_type === 'note' && result.note_id) {
+      setSidebarTab('notes');
+      handleSelectNote(result.note_id);
+      return;
+    }
+    if (result.result_type === 'chat' && result.conversation_id) {
+      setSidebarTab('chats');
+      localStorage.setItem('chatbranch-pending-search-nav', JSON.stringify({
+        conversationId: result.conversation_id,
+        messageId: result.message_id,
+        branchName: result.branch_name
+      }));
+      navigate(`/conversation/${result.conversation_id}`);
+    }
+  }, [handleSelectNote, navigate, setSidebarTab]);
   
   // Error modal state
   const [showErrorModal, setShowErrorModal] = useState(false);
@@ -1410,6 +1465,7 @@ const Home: React.FC = () => {
         canGoForward={false}
         onGoForward={() => {}}
         hasMessages={false}
+        searchSlot={<GlobalSearch onSelectResult={handleSearchResult} />}
       />
       <div className="main-container">
         <div className="sidebar-with-tabs">

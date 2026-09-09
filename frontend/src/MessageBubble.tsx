@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { getBranchColor as getUtilBranchColor, getBranchColorFromTree, getRandomBranchColor, BRANCH_COLORS } from './utils/branchColors';
 import { generateUniqueBranchName } from './utils/branchNaming';
+import { markdownFromSelection } from './utils/selectionMarkdown';
 import ContextMenu from './components/ContextMenu';
 
 interface Message {
@@ -84,7 +85,10 @@ const MessageBubble = memo<MessageBubbleProps>(({
   const handleRightClick = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     // Capture any active text selection so the context menu can offer "Save selection to note"
-    lastSelectionRef.current = window.getSelection()?.toString() || '';
+    const selection = window.getSelection();
+    lastSelectionRef.current = selection && selection.rangeCount > 0
+      ? markdownFromSelection(selection.getRangeAt(0))
+      : '';
     // Only allow branching from assistant messages via context menu when appropriate
     setContextMenuPos({ x: e.clientX, y: e.clientY });
     setContextMenuMessage(message);

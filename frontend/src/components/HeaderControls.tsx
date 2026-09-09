@@ -32,6 +32,7 @@ interface HeaderControlsProps {
   canGoForward: boolean;
   onGoForward: () => void;
   hasMessages?: boolean;
+  searchSlot?: React.ReactNode;
 }
 
 const HeaderControls: React.FC<HeaderControlsProps> = ({
@@ -51,7 +52,8 @@ const HeaderControls: React.FC<HeaderControlsProps> = ({
   onGoBack,
   canGoForward,
   onGoForward,
-  hasMessages = false
+  hasMessages = false,
+  searchSlot
 }) => {
   const { user, logout, loading } = useAuth();
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -386,6 +388,7 @@ const HeaderControls: React.FC<HeaderControlsProps> = ({
           </button>
         </div>
       </div>
+      {searchSlot && <div className="header-search-slot">{searchSlot}</div>}
       <div className="controls">
         {/* Branch selector with delete button - only show if conversation has messages */}
         {currentConversation && hasMessages && (

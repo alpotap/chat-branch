@@ -298,6 +298,32 @@ class SaveMessageToNote(BaseModel):
     content: str
     source_label: Optional[str] = None
 
+class SearchResult(BaseModel):
+    result_type: str
+    match_type: str
+    snippet: str
+    note_id: Optional[str] = None
+    note_title: Optional[str] = None
+    text_id: Optional[str] = None
+    conversation_id: Optional[str] = None
+    conversation_title: Optional[str] = None
+    message_id: Optional[str] = None
+    branch_name: Optional[str] = None
+
+    @field_validator(
+        'note_id', 'text_id', 'conversation_id', 'message_id',
+        mode='before'
+    )
+    @classmethod
+    def convert_search_ids_to_string(cls, v: Union[str, uuid.UUID, None]) -> Optional[str]:
+        if v is None:
+            return None
+        return str(v) if isinstance(v, uuid.UUID) else v
+
+class SearchResponse(BaseModel):
+    query: str
+    results: List[SearchResult] = []
+
 # Update forward references
 MessageNode.model_rebuild()
 

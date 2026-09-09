@@ -24,9 +24,10 @@ from app.schemas import (
     FolderCreate, FolderUpdate, FolderResponse, ConversationOrganize, SidebarOrder,
     NoteFolderCreate, NoteFolderUpdate, NoteFolderResponse,
     NoteCreate, NoteResponse, NoteOrganize, NotesSidebarOrder, NoteWithTexts,
-    NoteTextCreate, NoteTextUpdate, NoteTextResponse, NoteTextReorder, SaveMessageToNote
+    NoteTextCreate, NoteTextUpdate, NoteTextResponse, NoteTextReorder, SaveMessageToNote,
+    SearchResponse
 )
-from app.services import ConversationService, LLMService, AuthService, NoteService
+from app.services import ConversationService, LLMService, AuthService, NoteService, SearchService
 from app.auth import verify_token
 
 # Create tables
@@ -77,6 +78,7 @@ security = HTTPBearer()
 auth_service = AuthService()
 conversation_service = ConversationService()
 note_service = NoteService()
+search_service = SearchService()
 llm_service = LLMService()
 
 # Health check endpoint
@@ -466,6 +468,19 @@ async def get_current_user_info(current_user: User = Depends(get_current_user)):
         is_admin=(current_user.role == "admin"),
         is_active=current_user.is_active,
         created_at=current_user.created_at
+    )
+
+@app.get("/search", response_model=SearchResponse)
+async def search(
+    q: str = "",
+    limit: int = 50,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Search the current user's notes and active chat content."""
+    return SearchResponse(
+        query=q,
+        results=search_service.search(db, current_user.id, q, limit)
     )
 
 @app.post("/conversations", response_model=ConversationResponse)

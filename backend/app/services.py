@@ -1336,6 +1336,93 @@ class NoteService:
             source_label=source_label
         )
 
+class SearchService:
+    """Bounded, user-scoped substring search across notes and active chats."""
+
+    @staticmethod
+    def _snippet(value: str, term: str, max_length: int = 240) -> str:
+        text = value.strip()
+        if len(text) <= max_length:
+            return text
+        start = max(text.lower().find(term.lower()) - 60, 0)
+        end = min(start + max_length, len(text))
+        prefix = "..." if start > 0 else ""
+        suffix = "..." if end < len(text) else ""
+        return f"{prefix}{text[start:end].strip()}{suffix}"
+
+    def search(self, db: Session, user_id: str, query: str, limit: int = 50) -> List[Dict[str, Any]]:
+        term = query.strip()
+        if len(term) < 2:
+            return []
+
+        bounded_limit = max(1, min(limit, 100))
+        pattern = f"%{term}%"
+        results: List[Dict[str, Any]] = []
+
+        note_matches = db.query(Note).filter(
+            Note.user_id == user_id,
+            Note.title.ilike(pattern)
+        ).order_by(Note.title.asc(), Note.id.asc()).limit(bounded_limit).all()
+        for note in note_matches:
+            results.append({
+                "result_type": "note",
+                "match_type": "note_title",
+                "snippet": self._snippet(note.title, term),
+                "note_id": note.id,
+                "note_title": note.title,
+            })
+
+        note_text_matches = db.query(NoteText, Note).join(
+            Note, Note.id == NoteText.note_id
+        ).filter(
+            NoteText.user_id == user_id,
+            Note.user_id == user_id,
+            NoteText.content.ilike(pattern)
+        ).order_by(Note.title.asc(), NoteText.position.asc(), NoteText.id.asc()).limit(bounded_limit).all()
+        for text, note in note_text_matches:
+            results.append({
+                "result_type": "note",
+                "match_type": "note_text",
+                "snippet": self._snippet(text.content, term),
+                "note_id": note.id,
+                "note_title": note.title,
+                "text_id": text.id,
+            })
+
+        conversation_matches = db.query(Conversation).filter(
+            Conversation.user_id == user_id,
+            Conversation.title.ilike(pattern)
+        ).order_by(Conversation.title.asc(), Conversation.id.asc()).limit(bounded_limit).all()
+        for conversation in conversation_matches:
+            results.append({
+                "result_type": "chat",
+                "match_type": "conversation_title",
+                "snippet": self._snippet(conversation.title, term),
+                "conversation_id": conversation.id,
+                "conversation_title": conversation.title,
+            })
+
+        message_matches = db.query(Message, Conversation).join(
+            Conversation, Conversation.id == Message.conversation_id
+        ).filter(
+            Message.user_id == user_id,
+            Conversation.user_id == user_id,
+            Message.is_active.is_(True),
+            Message.content.ilike(pattern)
+        ).order_by(Conversation.title.asc(), Message.created_at.desc(), Message.id.asc()).limit(bounded_limit).all()
+        for message, conversation in message_matches:
+            results.append({
+                "result_type": "chat",
+                "match_type": "message",
+                "snippet": self._snippet(message.content, term),
+                "conversation_id": conversation.id,
+                "conversation_title": conversation.title,
+                "message_id": message.id,
+                "branch_name": message.branch_name,
+            })
+
+        return results[:bounded_limit]
+
 class LLMService:
     """
     LLM Service for ChatBranch - supports both dummy responses and real LLM calls
