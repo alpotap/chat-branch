@@ -1185,9 +1185,18 @@ class LLMService:
             "Long-term sustainability and evolution of the solution should also be considered."
         ]
     
-    async def generate_response(self, context: List[Dict], model: str = "google/gemma-3-27b-it:free", client_api_key: Optional[str] = None, **options: Any) -> str:
+    async def generate_response(
+        self,
+        context: List[Dict],
+        model: str = "google/gemma-3-27b-it:free",
+        client_api_key: Optional[str] = None,
+        provider_type: Optional[str] = None,
+        base_url: Optional[str] = None,
+        **options: Any
+    ) -> str:
         """
-        Generate a response using OpenRouter for any supported model.
+        Generate a response using OpenRouter (default), or a client-configured custom
+        OpenAI-compatible / Claude-compatible provider when `provider_type` is set.
         Falls back to dummy response if USE_DUMMY_RESPONSES is true or on error.
 
         Accepts an optional `client_api_key` which will be used for this single call only.
@@ -1199,6 +1208,12 @@ class LLMService:
         # Local Ollama models need no API key, so they bypass the dummy-response switch
         if self.is_ollama_model(model):
             return await self._call_ollama(context=context, model=model, **options)
+
+        if provider_type == "openai_compatible":
+            return await self._call_openai_compatible(context=context, model=model, base_url=base_url, client_api_key=client_api_key, **options)
+
+        if provider_type == "claude_compatible":
+            return await self._call_claude_compatible(context=context, model=model, base_url=base_url, client_api_key=client_api_key, **options)
 
         use_dummy = os.getenv("USE_DUMMY_RESPONSES", "true").lower() == "true"
         if use_dummy:
@@ -1248,6 +1263,106 @@ class LLMService:
             print(f"❌ Error calling OpenRouter: {e}")
             raise
     
+    async def _call_openai_compatible(self, context: List[Dict], model: str, base_url: Optional[str], client_api_key: Optional[str] = None, **options: Any) -> str:
+        """
+        Call a user-configured OpenAI-compatible endpoint (e.g. https://api.openai.com/v1,
+        a local vLLM/LM Studio server, etc). `base_url` and `client_api_key` come from the
+        client's own provider configuration for this single request only.
+        """
+        if not base_url:
+            raise Exception("No base URL provided for the OpenAI-compatible provider.")
+        if not client_api_key:
+            raise Exception("No API key provided for the OpenAI-compatible provider.")
+
+        formatted_context = []
+        for msg in context:
+            role = msg.get("role")
+            if role not in ("user", "assistant", "system"):
+                role = "user" if role == "model" else "assistant"
+            formatted_context.append({"role": role, "content": msg["content"]})
+
+        payload: Dict[str, Any] = {
+            "model": model,
+            "messages": formatted_context,
+            "temperature": options.get("temperature", 0.7),
+        }
+        if options.get("max_tokens"):
+            payload["max_tokens"] = options["max_tokens"]
+
+        headers = {"Authorization": f"Bearer {client_api_key}", "Content-Type": "application/json"}
+        url = f"{base_url.rstrip('/')}/chat/completions"
+
+        try:
+            timeout = aiohttp.ClientTimeout(total=float(os.getenv("CUSTOM_PROVIDER_TIMEOUT", "120")))
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(url, json=payload, headers=headers) as resp:
+                    if resp.status != 200:
+                        raise Exception(f"OpenAI-compatible provider returned {resp.status}: {await resp.text()}")
+                    data = await resp.json()
+            choices = data.get("choices") or []
+            if choices and choices[0].get("message", {}).get("content"):
+                return choices[0]["message"]["content"]
+            raise Exception(f"Unexpected response shape from OpenAI-compatible provider: {data}")
+        except Exception as e:
+            print(f"❌ Error calling OpenAI-compatible provider ({url}, model={model}): {e}")
+            raise
+
+    async def _call_claude_compatible(self, context: List[Dict], model: str, base_url: Optional[str], client_api_key: Optional[str] = None, **options: Any) -> str:
+        """
+        Call a user-configured Claude-compatible endpoint using Anthropic's native Messages API
+        shape (e.g. https://api.anthropic.com). `base_url` and `client_api_key` come from the
+        client's own provider configuration for this single request only.
+        """
+        if not base_url:
+            raise Exception("No base URL provided for the Claude-compatible provider.")
+        if not client_api_key:
+            raise Exception("No API key provided for the Claude-compatible provider.")
+
+        # Anthropic's Messages API takes `system` as a top-level field, not as a message role.
+        system_parts = []
+        messages = []
+        for msg in context:
+            role = msg.get("role")
+            content = msg.get("content")
+            if role == "system":
+                system_parts.append(content)
+                continue
+            if role not in ("user", "assistant"):
+                role = "user" if role == "model" else "assistant"
+            messages.append({"role": role, "content": content})
+
+        payload: Dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "max_tokens": options.get("max_tokens") or 1024,
+            "temperature": options.get("temperature", 0.7),
+        }
+        if system_parts:
+            payload["system"] = "\n\n".join(system_parts)
+
+        headers = {
+            "x-api-key": client_api_key,
+            "anthropic-version": "2023-06-01",
+            "Content-Type": "application/json",
+        }
+        url = f"{base_url.rstrip('/')}/v1/messages"
+
+        try:
+            timeout = aiohttp.ClientTimeout(total=float(os.getenv("CUSTOM_PROVIDER_TIMEOUT", "120")))
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(url, json=payload, headers=headers) as resp:
+                    if resp.status != 200:
+                        raise Exception(f"Claude-compatible provider returned {resp.status}: {await resp.text()}")
+                    data = await resp.json()
+            content_blocks = data.get("content") or []
+            text = "".join(block.get("text", "") for block in content_blocks if block.get("type") == "text")
+            if text:
+                return text
+            raise Exception(f"Unexpected response shape from Claude-compatible provider: {data}")
+        except Exception as e:
+            print(f"❌ Error calling Claude-compatible provider ({url}, model={model}): {e}")
+            raise
+
     @staticmethod
     def is_ollama_model(model: str) -> bool:
         return isinstance(model, str) and model.startswith("ollama/")

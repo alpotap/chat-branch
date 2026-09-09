@@ -1,6 +1,16 @@
 import React, { useCallback, useState, useEffect } from 'react';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
+import {
+  ProviderConfig,
+  ProviderType,
+  loadProviders,
+  saveProviders,
+  getProviderKey,
+  setProviderKey,
+  clearProviderKey,
+  buildCustomProviderModel
+} from '../utils/providerResolution';
 
 const API_BASE = process.env.REACT_APP_API_BASE;
 
@@ -303,6 +313,56 @@ const HeaderControls: React.FC<HeaderControlsProps> = ({
     setManageMessage('Cleared client key');
   }, []);
 
+  // Custom providers (OpenAI-compatible / Claude-compatible), localStorage-backed POC
+  const [providers, setProviders] = useState<ProviderConfig[]>(() => loadProviders());
+  const [newProviderName, setNewProviderName] = useState('');
+  const [newProviderType, setNewProviderType] = useState<ProviderType>('openai_compatible');
+  const [newProviderBaseUrl, setNewProviderBaseUrl] = useState('');
+  const [newProviderApiKey, setNewProviderApiKey] = useState('');
+  const [newProviderPersist, setNewProviderPersist] = useState(true);
+  const [newProviderModelName, setNewProviderModelName] = useState('');
+  const [newProviderModelFor, setNewProviderModelFor] = useState('');
+
+  useEffect(() => {
+    saveProviders(providers);
+  }, [providers]);
+
+  const handleAddProvider = useCallback(() => {
+    const name = newProviderName.trim();
+    const baseUrl = newProviderBaseUrl.trim();
+    if (!name) return setManageMessage('Provider name cannot be empty');
+    if (!baseUrl) return setManageMessage('Provider base URL cannot be empty');
+    const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || `provider-${Date.now()}`;
+    if (providers.some(p => p.id === id)) return setManageMessage('A provider with this name already exists');
+    const provider: ProviderConfig = { id, name, type: newProviderType, baseUrl };
+    setProviders(prev => [...prev, provider]);
+    if (newProviderApiKey) setProviderKey(id, newProviderApiKey, newProviderPersist);
+    setNewProviderName('');
+    setNewProviderBaseUrl('');
+    setNewProviderApiKey('');
+    setManageMessage(`Added provider ${name}`);
+  }, [newProviderName, newProviderType, newProviderBaseUrl, newProviderApiKey, newProviderPersist, providers]);
+
+  const handleRemoveProvider = useCallback((providerId: string) => {
+    setProviders(prev => prev.filter(p => p.id !== providerId));
+    clearProviderKey(providerId);
+    setModels(prev => prev.filter(m => !m.startsWith(`${providerId}::`)));
+    setManageMessage('Removed provider');
+  }, []);
+
+  const handleAddProviderModel = useCallback(() => {
+    const providerId = newProviderModelFor;
+    const modelName = newProviderModelName.trim();
+    if (!providerId) return setManageMessage('Choose a provider first');
+    if (!modelName) return setManageMessage('Model name cannot be empty');
+    const full = buildCustomProviderModel(providerId, modelName);
+    if (models.includes(full)) return setManageMessage('Model already exists');
+    setModels(prev => [...prev, full]);
+    onModelChange(full);
+    setNewProviderModelName('');
+    setManageMessage(`Added model ${full}`);
+  }, [newProviderModelFor, newProviderModelName, models, onModelChange]);
+
   return (
     <div className="header">
       <div className="header-left">
@@ -591,7 +651,7 @@ const HeaderControls: React.FC<HeaderControlsProps> = ({
       {/* Manage Models & Client Key Modal */}
       {showManageModels && (
         <div className="modal-overlay">
-          <div className="modal">
+          <div className="modal modal-wide">
             <h3>🧩 Manage Models & Client Key</h3>
 
             <div style={{ marginBottom: 8 }}>
@@ -645,7 +705,90 @@ const HeaderControls: React.FC<HeaderControlsProps> = ({
             <hr />
 
             <div style={{ marginTop: 8 }}>
-              <label style={{ display: 'block', marginBottom: 4, color: '#111' }}>Client API Key</label>
+              <label style={{ display: 'block', marginBottom: 4, color: '#111' }}>Custom Providers (OpenAI/Claude-compatible)</label>
+              <small style={{ color: '#666', display: 'block', marginBottom: 6 }}>
+                Provider name/type/URL are stored in this browser's localStorage. Each provider's API key is stored separately, only in this browser's localStorage (if "Persist" is checked) or sessionStorage (cleared when this tab closes) otherwise — never saved to the server, the database, or the git repo. Keys are sent to the backend only when you use that provider.
+              </small>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
+                {providers.length === 0 ? (
+                  <small style={{ color: '#666' }}>No custom providers configured yet.</small>
+                ) : providers.map(p => (
+                  <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 8px', background: 'rgba(0,0,0,0.03)', borderRadius: 6 }}>
+                    <div>
+                      <strong style={{ fontSize: '0.9em', color: '#111' }}>{p.name}</strong>
+                      <small style={{ color: '#666', display: 'block' }}>{p.type === 'openai_compatible' ? 'OpenAI-compatible' : 'Claude-compatible'} · {p.baseUrl}</small>
+                    </div>
+                    <button onClick={() => handleRemoveProvider(p.id)} className="tiny-btn" style={{ background: '#e5e7eb', color: '#111', border: 'none' }}>Remove</button>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
+                <input
+                  type="text"
+                  value={newProviderName}
+                  onChange={(e) => setNewProviderName(e.target.value)}
+                  placeholder="Provider name, e.g. Work Proxy"
+                  style={{ flex: '1 1 160px', color: '#111', padding: '6px 8px' }}
+                />
+                <select
+                  value={newProviderType}
+                  onChange={(e) => setNewProviderType(e.target.value as ProviderType)}
+                  style={{ padding: '6px 8px' }}
+                >
+                  <option value="openai_compatible">OpenAI-compatible</option>
+                  <option value="claude_compatible">Claude-compatible</option>
+                </select>
+                <input
+                  type="text"
+                  value={newProviderBaseUrl}
+                  onChange={(e) => setNewProviderBaseUrl(e.target.value)}
+                  placeholder="Base URL, e.g. https://api.openai.com/v1"
+                  style={{ flex: '1 1 220px', color: '#111', padding: '6px 8px' }}
+                />
+                <input
+                  type="password"
+                  value={newProviderApiKey}
+                  onChange={(e) => setNewProviderApiKey(e.target.value)}
+                  placeholder="API key"
+                  style={{ flex: '1 1 160px', color: '#111', padding: '6px 8px' }}
+                />
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#111' }}>
+                  <input type="checkbox" checked={newProviderPersist} onChange={(e) => setNewProviderPersist(e.target.checked)} />
+                  Persist
+                </label>
+                <button onClick={handleAddProvider} className="confirm-btn" style={{ backgroundColor: '#667eea', color: '#fff', border: 'none', padding: '6px 10px' }}>Add Provider</button>
+              </div>
+
+              {providers.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  <select
+                    value={newProviderModelFor}
+                    onChange={(e) => setNewProviderModelFor(e.target.value)}
+                    style={{ padding: '6px 8px' }}
+                  >
+                    <option value="">Select provider for model...</option>
+                    {providers.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                  <input
+                    type="text"
+                    value={newProviderModelName}
+                    onChange={(e) => setNewProviderModelName(e.target.value)}
+                    placeholder="Model name, e.g. gpt-4o-mini"
+                    style={{ flex: 1, color: '#111', padding: '6px 8px' }}
+                  />
+                  <button onClick={handleAddProviderModel} className="confirm-btn" style={{ backgroundColor: '#667eea', color: '#fff', border: 'none', padding: '6px 10px' }}>Add Model</button>
+                </div>
+              )}
+            </div>
+
+            <hr />
+
+            <div style={{ marginTop: 8 }}>
+              <label style={{ display: 'block', marginBottom: 4, color: '#111' }}>Client API Key (OpenRouter)</label>
+              <small style={{ color: '#666', display: 'block', marginBottom: 6 }}>
+                Stored only in this browser's {keyPersist ? 'localStorage (persists across sessions)' : "sessionStorage (cleared when this tab closes)"} — never saved to the server, the database, or the git repo. It is sent to the backend only when you send a message.
+              </small>
               <input
                 type="password"
                 value={keyInputValue}

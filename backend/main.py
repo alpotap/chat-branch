@@ -335,7 +335,9 @@ async def add_message(
         ai_response_content = await llm_service.generate_response(
             context,
             model=message.llm_model,
-            client_api_key=getattr(message, 'client_api_key', None)
+            client_api_key=getattr(message, 'client_api_key', None),
+            provider_type=getattr(message, 'provider_type', None),
+            base_url=getattr(message, 'provider_base_url', None)
         )
         
         # Handle empty or error-like responses from the LLM service
@@ -627,7 +629,14 @@ async def update_message_content(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-async def _generate_summary(context: List[dict], model: Optional[str], client_api_key: Optional[str], instruction: str) -> str:
+async def _generate_summary(
+    context: List[dict],
+    model: Optional[str],
+    client_api_key: Optional[str],
+    instruction: str,
+    provider_type: Optional[str] = None,
+    provider_base_url: Optional[str] = None
+) -> str:
     """Ask the LLM for a summary of the supplied context"""
     summary_context = list(context)
     summary_context.append({"role": "user", "content": instruction})
@@ -635,7 +644,9 @@ async def _generate_summary(context: List[dict], model: Optional[str], client_ap
         summary = await llm_service.generate_response(
             summary_context,
             model=model or "demo-response",
-            client_api_key=client_api_key
+            client_api_key=client_api_key,
+            provider_type=provider_type,
+            base_url=provider_base_url
         )
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"Summarization failed: {str(e)}")
@@ -670,7 +681,9 @@ async def summarize_message(
         [{"role": "user", "content": message.content}],
         options.get("llm_model"),
         options.get("client_api_key"),
-        "Summarize the message above concisely, keeping the key points and any decisions."
+        "Summarize the message above concisely, keeping the key points and any decisions.",
+        options.get("provider_type"),
+        options.get("provider_base_url")
     )
 
     title = f"Summary of {conversation.title} {message.branch_name}"
@@ -701,7 +714,9 @@ async def summarize_branch(
         context,
         options.get("llm_model"),
         options.get("client_api_key"),
-        "Summarize the conversation above concisely: the topic, key points, decisions and open questions."
+        "Summarize the conversation above concisely: the topic, key points, decisions and open questions.",
+        options.get("provider_type"),
+        options.get("provider_base_url")
     )
 
     title = f"Summary of {conversation.title} {branch_name}"
@@ -748,8 +763,14 @@ async def regenerate_message_in_branch(
         
         llm_model = original_ai_message.llm_model if (original_ai_message and original_ai_message.llm_model) else "demo-response"
         
-        # Generate AI response
-        ai_response = await llm_service.generate_response(context, llm_model)
+        # Generate AI response (optional client-supplied key/provider override for this request)
+        ai_response = await llm_service.generate_response(
+            context,
+            llm_model,
+            client_api_key=request_body.get("client_api_key"),
+            provider_type=request_body.get("provider_type"),
+            base_url=request_body.get("provider_base_url")
+        )
         
         # Create the AI message in the new branch
         ai_message_create = MessageCreate(
@@ -798,10 +819,12 @@ async def regenerate_message_in_branch(
 async def regenerate_message_in_place(
     conversation_id: str,
     message_id: str,
+    request_body: dict = None,  # Optional {"client_api_key": "...", "provider_type": "...", "provider_base_url": "..."}
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """Regenerate an AI message in place by deleting the old one"""
+    options = request_body or {}
     try:
         # Validate conversation belongs to user
         conversation = conversation_service.get_conversation(db, conversation_id, current_user.id)
@@ -854,7 +877,10 @@ async def regenerate_message_in_place(
         # Generate AI response using LLM service
         ai_response = await llm_service.generate_response(
             context,
-            llm_model
+            llm_model,
+            client_api_key=options.get("client_api_key"),
+            provider_type=options.get("provider_type"),
+            base_url=options.get("provider_base_url")
         )
 
         # Update the existing AI message content instead of deleting and recreating
@@ -878,7 +904,7 @@ async def regenerate_message_in_place(
 async def edit_message_in_place(
     conversation_id: str,
     message_id: str,
-    request: dict, # Expects {"content": "new content"}
+    request: dict, # Expects {"content": "new content", "client_api_key": "...", "provider_type": "...", "provider_base_url": "..."}
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -924,7 +950,10 @@ async def edit_message_in_place(
                 try:
                     ai_response_content = await llm_service.generate_response(
                         context,
-                        model=msg.llm_model or "demo-response"
+                        model=msg.llm_model or "demo-response",
+                        client_api_key=request.get("client_api_key"),
+                        provider_type=request.get("provider_type"),
+                        base_url=request.get("provider_base_url")
                     )
                 except Exception as e:
                     # Roll back user edit on LLM failure to avoid partial state
@@ -947,7 +976,7 @@ async def edit_message_in_place(
 async def edit_message_as_branch(
     conversation_id: str,
     message_id: str,
-    request: dict, # Expects {"content": "new content"}
+    request: dict, # Expects {"content": "new content", "client_api_key": "...", "provider_type": "...", "provider_base_url": "..."}
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -977,7 +1006,13 @@ async def edit_message_as_branch(
         )
         context.append({"role": "user", "content": new_message_create.content})
 
-        ai_response_content = await llm_service.generate_response(context, model=new_message_create.llm_model)
+        ai_response_content = await llm_service.generate_response(
+            context,
+            model=new_message_create.llm_model,
+            client_api_key=request.get("client_api_key"),
+            provider_type=request.get("provider_type"),
+            base_url=request.get("provider_base_url")
+        )
         if not ai_response_content or ai_response_content.strip() == "":
              raise HTTPException(status_code=503, detail="AI failed to generate a valid response.")
 

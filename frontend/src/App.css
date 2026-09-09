@@ -703,6 +703,12 @@ body,
   width: 90%;
 }
 
+.modal-wide {
+  max-width: 720px;
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
 .modal h3 {
   margin-top: 0;
   margin-bottom: 0.5rem;

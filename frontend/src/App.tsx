@@ -14,6 +14,7 @@ import { useConversations } from './hooks/useConversations';
 import useOptimisticDeletes from './hooks/useOptimisticDeletes';
 import { useMessages } from './hooks/useMessages';
 import { useBranchMessages } from './hooks/useBranchMessages';
+import { resolveModelRequestFields } from './utils/providerResolution';
 import './App.css';
 
 const API_BASE = process.env.REACT_APP_API_BASE || '/api';
@@ -530,10 +531,14 @@ const ConversationApp: React.FC = () => {
     if (!currentConversation) return;
 
     try {
+      const targetMessage = conversationTree?.messages?.[messageId];
+      const modelFields = resolveModelRequestFields(targetMessage?.llm_model || '');
+
       if (type === 'branch') {
         // Regenerate in new branch
         const response = await axios.post(`${API_BASE}/conversations/${currentConversation.id}/messages/${messageId}/regenerate-branch`, {
-          branch_name: branchName || 'regen-main'
+          branch_name: branchName || 'regen-main',
+          ...modelFields
         });
 
         console.log('✅ Branch regeneration successful:', response.data);
@@ -555,7 +560,7 @@ const ConversationApp: React.FC = () => {
         
       } else {
         // Regenerate in place
-        const response = await axios.post(`${API_BASE}/conversations/${currentConversation.id}/messages/${messageId}/regenerate-place`);
+        const response = await axios.post(`${API_BASE}/conversations/${currentConversation.id}/messages/${messageId}/regenerate-place`, modelFields);
 
         console.log('✅ In-place regeneration successful:', response.data);
         
@@ -772,13 +777,16 @@ const ConversationApp: React.FC = () => {
 
     // Rely on the global axios interceptor to add the token.
     try {
+      const editedMessage = conversationTree?.messages?.[messageId];
+      const editModelFields = resolveModelRequestFields(editedMessage?.llm_model || '');
+
       if (editType === 'in-place') {
         await axios.put(`${API_BASE}/conversations/${currentConversation.id}/messages/${messageId}`,
-          { content: newContent }
+          { content: newContent, ...editModelFields }
         );
       } else {
         const response = await axios.post(`${API_BASE}/conversations/${currentConversation.id}/messages/${messageId}/edit-as-branch`,
-          { content: newContent }
+          { content: newContent, ...editModelFields }
         );
         // After creating a branch, switch to it; if this edit originated from tree view, remain in tree
         if (response.data && response.data.branch_name) {
@@ -816,10 +824,7 @@ const ConversationApp: React.FC = () => {
     }
   }, [currentConversation, loadConversation, showError]);
 
-  const summarizeRequestBody = useCallback(() => ({
-    llm_model: selectedModel,
-    client_api_key: sessionStorage.getItem('chatbranch_api_key') || localStorage.getItem('chatbranch_api_key') || undefined
-  }), [selectedModel]);
+  const summarizeRequestBody = useCallback(() => resolveModelRequestFields(selectedModel), [selectedModel]);
 
   const handleSummarizeMessage = useCallback(async (messageId: string) => {
     if (!currentConversation) return;

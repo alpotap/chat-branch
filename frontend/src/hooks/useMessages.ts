@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import axios from 'axios';
 import { getRandomBranchColor } from '../utils/branchColors';
+import { resolveModelRequestFields } from '../utils/providerResolution';
 
 const API_BASE = process.env.REACT_APP_API_BASE;
 
@@ -26,15 +27,13 @@ export const useMessages = () => {
     });
 
     try {
-      // Include client-stored API key if present (sessionStorage preferred)
-      const clientKey = sessionStorage.getItem('chatbranch_api_key') || localStorage.getItem('chatbranch_api_key') || undefined;
+      const modelFields = resolveModelRequestFields(selectedModel);
       await axios.post(`${API_BASE}/conversations/${conversationId}/messages`, {
         content: message,
         role: 'user',
-        llm_model: selectedModel,
         branch_name: currentBranch,
         parent_id: parentMessageId || null,
-        client_api_key: clientKey
+        ...modelFields
       });
       setNewMessage('');
       return true;

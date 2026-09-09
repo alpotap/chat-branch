@@ -72,6 +72,9 @@ class MessageCreate(BaseModel):
     llm_model: Optional[str] = None
     # Optional client-supplied API key for per-request LLM calls (client-only storage)
     client_api_key: Optional[str] = None
+    # Optional custom provider override (client-only config): 'openai_compatible' | 'claude_compatible'
+    provider_type: Optional[str] = None
+    provider_base_url: Optional[str] = None
 
 class MessageResponse(BaseModel):
     id: str
